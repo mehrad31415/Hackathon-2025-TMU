@@ -16,13 +16,17 @@ const LOG = (...a) => console.debug('[AI-Blur]', ...a);
     .${BLUR_WRAPPER}{display:inline-block;position:relative;}
     .${BLUR_OVERLAY}{
       position:absolute;inset:0;
-      backdrop-filter:blur(20px);
+      backdrop-filter:blur(30px);
       background:rgba(0,0,0,.3);
       pointer-events:none;
     }`;
   (document.head || document.documentElement).appendChild(style);
   LOG('CSS injected');
 })();
+/* ---------- un-blur helper ---------- */
+function unblurImage(img) {
+  img.classList.add('ai-safe');   // CSS lifts the default blur
+}
 
 /* ---------- blur helper ---------- */
 function blurImage(img) {
@@ -164,11 +168,25 @@ new MutationObserver(muts => {
   attributeFilter: ['src', 'srcset']
 });
 
+// /* ---------- verdict listener ---------- */
+// chrome.runtime.onMessage.addListener(msg => {
+//   // if (msg.action !== 'BLUR_IF_SNAKE' || !msg.isSnake) return;
+//   if (msg.action !== 'BLUR_IF_BLOCKLIST' || !msg.shouldBlur) return;
+//   const targets = imgsBySrc(msg.url);
+//   targets.forEach(blurImage);
+//   LOG('BLURRED', targets.length, 'img(s)', msg.url);
+// });
+
 /* ---------- verdict listener ---------- */
 chrome.runtime.onMessage.addListener(msg => {
-  // if (msg.action !== 'BLUR_IF_SNAKE' || !msg.isSnake) return;
-  if (msg.action !== 'BLUR_IF_BLOCKLIST' || !msg.shouldBlur) return;
+  if (msg.action !== 'BLUR_IF_BLOCKLIST') return;
   const targets = imgsBySrc(msg.url);
-  targets.forEach(blurImage);
-  LOG('BLURRED', targets.length, 'img(s)', msg.url);
+
+  if (msg.shouldBlur) {               // 🚫  blocked ⇒ keep default blur + overlay
+    targets.forEach(blurImage);       // adds heavy overlay once
+    LOG('BLOCKED', targets.length, 'img(s)', msg.url);
+  } else {                            // ✅  safe ⇒ remove default blur
+    targets.forEach(unblurImage);
+    LOG('SAFE', targets.length, 'img(s)', msg.url);
+  }
 });
