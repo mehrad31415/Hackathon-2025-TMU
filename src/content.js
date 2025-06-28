@@ -1,9 +1,9 @@
 /**  AI-Snake-Blur content script  **/
 
 /* ---------- constants ---------- */
-const IMAGE_SIZE   = 224;   // MobileNet input
-const MIN_IMG_PX   = 128;   // skip tiny icons
-const THRESHOLD_MS = 5000;  // give fetch fallback max 5 s
+const IMAGE_SIZE = 224; // MobileNet input
+const MIN_IMG_PX = 128; // skip tiny icons
+const THRESHOLD_MS = 5000; // give fetch fallback max 5 s
 
 const BLUR_WRAPPER = 'ai-blur-wrapper';
 const BLUR_OVERLAY = 'ai-blur-overlay';
@@ -23,9 +23,10 @@ const LOG = (...a) => console.debug('[AI-Blur]', ...a);
   (document.head || document.documentElement).appendChild(style);
   LOG('CSS injected');
 })();
+
 /* ---------- un-blur helper ---------- */
 function unblurImage(img) {
-  img.classList.add('ai-safe');   // CSS lifts the default blur
+  img.classList.add('ai-safe'); // CSS lifts the default blur
 }
 
 /* ---------- blur helper ---------- */
@@ -45,7 +46,8 @@ function blurImage(img) {
 
 /* ---------- util ---------- */
 const processedUrls = new Set();
-const imgsBySrc = url => Array.from(document.images).filter(im => im.src === url);
+const imgsBySrc = (url) =>
+  Array.from(document.images).filter((im) => im.src === url);
 
 /* ---------- pixel helpers ---------- */
 function drawToCanvas(imgLike) {
@@ -115,40 +117,69 @@ async function classifyUrl(url) {
     rawImageData: Array.from(imgData.data),
     width: IMAGE_SIZE,
     height: IMAGE_SIZE,
-    url
+    url,
   });
   LOG('→ CLASSIFY_IMAGE', url);
 }
 
 /* ---------- decide whether to queue a DOM <img> ---------- */
 function consider(img) {
-  if (!img.complete) return;               // still loading
+  if (!img.complete) return; // still loading
   if (Math.max(img.naturalWidth, img.naturalHeight) < MIN_IMG_PX) return;
   classifyUrl(img.src);
+}
+
+/* ---------- reprocess all images on page ---------- */
+function reprocessAllImages() {
+  LOG('Reprocessing all images on page');
+
+  // Clear processed URLs cache to allow reprocessing
+  processedUrls.clear();
+
+  // Remove all existing blur wrappers and overlays
+  document.querySelectorAll(`.${BLUR_WRAPPER}`).forEach((wrapper) => {
+    const img = wrapper.querySelector('img');
+    if (img) {
+      wrapper.parentNode.insertBefore(img, wrapper);
+      wrapper.remove();
+      delete img.dataset.aiBlurProcessed;
+    }
+  });
+
+  // Remove all ai-safe classes
+  document.querySelectorAll('img.ai-safe').forEach((img) => {
+    img.classList.remove('ai-safe');
+  });
+
+  // Reprocess all images
+  document.querySelectorAll('img').forEach(consider);
 }
 
 /* ---------- initial sweep ---------- */
 document.querySelectorAll('img').forEach(consider);
 
 /* ---------- IntersectionObserver for infinite scroll ---------- */
-const io = new IntersectionObserver(entries => {
-  entries.forEach(e => {
-    if (e.isIntersecting) consider(e.target);
-  });
-}, { root: null, threshold: 0 });
+const io = new IntersectionObserver(
+  (entries) => {
+    entries.forEach((e) => {
+      if (e.isIntersecting) consider(e.target);
+    });
+  },
+  { root: null, threshold: 0 }
+);
 
-document.querySelectorAll('img').forEach(img => io.observe(img));
+document.querySelectorAll('img').forEach((img) => io.observe(img));
 
 /* ---------- MutationObserver: new nodes + src/srcset changes ---------- */
-new MutationObserver(muts => {
+new MutationObserver((muts) => {
   for (const m of muts) {
     /* new nodes */
-    m.addedNodes.forEach(n => {
+    m.addedNodes.forEach((n) => {
       if (n.tagName === 'IMG') {
         io.observe(n);
         consider(n);
       } else if (n.querySelectorAll) {
-        n.querySelectorAll('img').forEach(img => {
+        n.querySelectorAll('img').forEach((img) => {
           io.observe(img);
           consider(img);
         });
@@ -165,28 +196,25 @@ new MutationObserver(muts => {
   childList: true,
   subtree: true,
   attributes: true,
-  attributeFilter: ['src', 'srcset']
+  attributeFilter: ['src', 'srcset'],
 });
 
-// /* ---------- verdict listener ---------- */
-// chrome.runtime.onMessage.addListener(msg => {
-//   // if (msg.action !== 'BLUR_IF_SNAKE' || !msg.isSnake) return;
-//   if (msg.action !== 'BLUR_IF_BLOCKLIST' || !msg.shouldBlur) return;
-//   const targets = imgsBySrc(msg.url);
-//   targets.forEach(blurImage);
-//   LOG('BLURRED', targets.length, 'img(s)', msg.url);
-// });
-
 /* ---------- verdict listener ---------- */
-chrome.runtime.onMessage.addListener(msg => {
-  if (msg.action !== 'BLUR_IF_BLOCKLIST') return;
-  const targets = imgsBySrc(msg.url);
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.action === 'BLUR_IF_BLOCKLIST') {
+    const targets = imgsBySrc(msg.url);
 
-  if (msg.shouldBlur) {               // 🚫  blocked ⇒ keep default blur + overlay
-    targets.forEach(blurImage);       // adds heavy overlay once
-    LOG('BLOCKED', targets.length, 'img(s)', msg.url);
-  } else {                            // ✅  safe ⇒ remove default blur
-    targets.forEach(unblurImage);
-    LOG('SAFE', targets.length, 'img(s)', msg.url);
+    if (msg.shouldBlur) {
+      // 🚫  blocked ⇒ keep default blur + overlay
+      targets.forEach(blurImage); // adds heavy overlay once
+      LOG('BLOCKED', targets.length, 'img(s)', msg.url);
+    } else {
+      // ✅  safe ⇒ remove default blur
+      targets.forEach(unblurImage);
+      LOG('SAFE', targets.length, 'img(s)', msg.url);
+    }
+  } else if (msg.action === 'REPROCESS_IMAGES') {
+    // Reprocess all images when settings are updated
+    reprocessAllImages();
   }
 });

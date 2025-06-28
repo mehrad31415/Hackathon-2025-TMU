@@ -93,7 +93,19 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
     classifier.classify(imgData, url, sender.tab.id);
   } else if (msg.action === 'RELOAD_SETTINGS') {
     // Reload blocklist when user saves new settings
-    loadBlocklist();
-    LOG('Settings reloaded');
+    loadBlocklist().then(() => {
+      LOG('Settings reloaded, notifying all tabs to reprocess images');
+
+      // Notify all active tabs to reprocess their images
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach((tab) => {
+          chrome.tabs
+            .sendMessage(tab.id, { action: 'REPROCESS_IMAGES' })
+            .catch(() => {
+              // Ignore errors for tabs that don't have content scripts
+            });
+        });
+      });
+    });
   }
 });

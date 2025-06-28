@@ -234,13 +234,18 @@ document.addEventListener('DOMContentLoaded', function () {
       },
       function () {
         showStatus(
-          `Settings saved! ${uniqueBlocklist.length} word(s) will be blurred.`,
+          `Settings saved! ${uniqueBlocklist.length} word(s) will be blurred. Reprocessing current page...`,
           'success'
         );
         updateActiveCount();
 
-        // Notify service worker to reload settings
+        // Notify service worker to reload settings and reprocess images
         chrome.runtime.sendMessage({ action: 'RELOAD_SETTINGS' });
+
+        // Close popup after a short delay to show the reprocessing in action
+        setTimeout(() => {
+          window.close();
+        }, 1500);
       }
     );
   }
