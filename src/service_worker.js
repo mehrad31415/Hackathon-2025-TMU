@@ -9,7 +9,8 @@ const RETRY_MS = 3000;
 const LOG = (...a) => console.info('[AI-Blur][SW]', ...a);
 
 const GEMINI_API_KEY = 'AIzaSyBTCd3G6ruJ4KSg0zuwjSOOyY8jrFG3mWg';
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent';
+const GEMINI_API_URL =
+  'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent';
 
 // Default blocklist (fallback) - use let instead of const
 let INITIAL_BLOCKLIST_TERMS = [
@@ -38,7 +39,6 @@ async function loadBlocklist() {
 // Load settings on startup
 loadBlocklist();
 
-
 let BLOCKLIST = []; // This will be populated dynamically
 
 // Simple cache for expanded terms to avoid redundant API calls
@@ -49,14 +49,14 @@ const expandedTermsCache = new Map();
  * @param {string} term The word to find similar terms for.
  * @returns {Promise<string[]>} An array of similar words.
  */
- import { CLEANED_LABELS } from './cleaned-labels.js';
+import { CLEANED_LABELS } from './cleaned-labels.js';
 
- async function getSimilarWordsFromGemini(term) {
-   if (expandedTermsCache.has(term)) {
-     return expandedTermsCache.get(term);
-   }
- 
-   const prompt = `
+async function getSimilarWordsFromGemini(term) {
+  if (expandedTermsCache.has(term)) {
+    return expandedTermsCache.get(term);
+  }
+
+  const prompt = `
 You are given a list of labeled concepts commonly found in image classification:
 ${CLEANED_LABELS.join(', ')}
 
@@ -70,55 +70,57 @@ Similar words should only be returned if "${term}" has the suffix -like.
 Otherwise only return **exact matches from the list** above that relate to the term "${term}".
 Respond with a comma-separated list of the matching cleaned labels, and nothing else.
 `;
- 
-   try {
-     const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
-       method: 'POST',
-       headers: { 'Content-Type': 'application/json' },
-       body: JSON.stringify({
-         contents: [{ parts: [{ text: prompt }] }],
-       }),
-     });
- 
-     if (!response.ok) {
-       throw new Error(`Gemini API HTTP error! status: ${response.status}`);
-     }
- 
-     const data = await response.json();
-     if (data?.candidates?.[0]?.content?.parts?.[0]?.text) {
-       const generatedText = data.candidates[0].content.parts[0].text;
-       const similarWords = generatedText
-         .split(',')
-         .map(word => word.trim().toLowerCase())
-         .filter(word => word.length > 0);
- 
-       LOG(`Gemini returned relevant cleaned matches for "${term}":`, similarWords);
-       expandedTermsCache.set(term, similarWords);
-       return similarWords;
-     }
-   } catch (error) {
-     LOG(`Error calling Gemini API for "${term}":`, error);
-   }
-   return [];
- }
+
+  try {
+    const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Gemini API HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (data?.candidates?.[0]?.content?.parts?.[0]?.text) {
+      const generatedText = data.candidates[0].content.parts[0].text;
+      const similarWords = generatedText
+        .split(',')
+        .map((word) => word.trim().toLowerCase())
+        .filter((word) => word.length > 0);
+
+      LOG(
+        `Gemini returned relevant cleaned matches for "${term}":`,
+        similarWords
+      );
+      expandedTermsCache.set(term, similarWords);
+      return similarWords;
+    }
+  } catch (error) {
+    LOG(`Error calling Gemini API for "${term}":`, error);
+  }
+  return [];
+}
 
 /**
  * Expands the initial blocklist with similar terms using the Gemini API.
  */
 async function expandBlocklist() {
   LOG('Expanding blocklist using Gemini API...');
-  const newBlocklist = new Set(INITIAL_BLOCKLIST_TERMS.map(w => w.toLowerCase())); // Start with initial terms
+  const newBlocklist = new Set(
+    INITIAL_BLOCKLIST_TERMS.map((w) => w.toLowerCase())
+  ); // Start with initial terms
 
   for (const term of INITIAL_BLOCKLIST_TERMS) {
     const similarWords = await getSimilarWordsFromGemini(term);
-    similarWords.forEach(word => newBlocklist.add(word));
+    similarWords.forEach((word) => newBlocklist.add(word));
   }
   BLOCKLIST = Array.from(newBlocklist);
   LOG('Final expanded BLOCKLIST:', BLOCKLIST);
 }
-
-
-
 
 class SnakeClassifier {
   constructor() {
@@ -140,7 +142,8 @@ class SnakeClassifier {
       setTimeout(() => this.classify(imgData, url, tabId), RETRY_MS);
       return;
     }
-    if (BLOCKLIST.length === 0 && INITIAL_BLOCKLIST_TERMS.length > 0) { // Check if expansion is still pending
+    if (BLOCKLIST.length === 0 && INITIAL_BLOCKLIST_TERMS.length > 0) {
+      // Check if expansion is still pending
       LOG('Blocklist not yet expanded, retrying classification...');
       setTimeout(() => this.classify(imgData, url, tabId), RETRY_MS);
       return;

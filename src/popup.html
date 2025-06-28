@@ -95,6 +95,8 @@
         border-radius: 8px;
         padding: 15px;
         width: 100%;
+        background: #ffffff;
+        border-left: 4px solid #4285f4;
       }
       label {
         font-weight: bold;
@@ -113,6 +115,40 @@
         font-size: 12px;
         box-sizing: border-box;
         max-width: 100%;
+      }
+      .update-toggles-btn {
+        background: #6c757d;
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+        margin-top: 10px;
+        width: 100%;
+      }
+      .update-toggles-btn:hover {
+        background: #5a6268;
+      }
+      .tag-toggles {
+        margin-top: 15px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .tag-toggle-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px;
+        background: #f8f9fa;
+        border-radius: 4px;
+        border: 1px solid #e9ecef;
+      }
+      .tag-toggle-label {
+        font-size: 11px;
+        color: #495057;
+        flex: 1;
       }
       .save-btn {
         background: #4285f4;
@@ -154,6 +190,13 @@
         color: #4285f4;
         margin-top: 5px;
       }
+      .no-tags {
+        font-size: 11px;
+        color: #999;
+        font-style: italic;
+        text-align: center;
+        padding: 10px;
+      }
     </style>
   </head>
   <body>
@@ -161,18 +204,30 @@
       <h2>AI Image Blur Settings</h2>
 
       <div class="custom-section">
-        <label for="customWords">Custom Words:</label>
+        <h3>Custom Keywords</h3>
+        <label for="customWords">Words to blur:</label>
         <textarea
           id="customWords"
-          placeholder="Enter additional words or phrases separated by commas&#10;Example: snake, spider, specific term"
+          placeholder="Enter words or phrases separated by commas&#10;Example: snake, spider, gun, blood"
         ></textarea>
         <div class="help-text">
-          Images recognized as containing these objects will be blurred.
+          Images containing these words in their AI classification will be
+          blurred.
+        </div>
+
+        <button class="update-toggles-btn" id="updateTogglesBtn">
+          Update Toggle Options
+        </button>
+
+        <div class="tag-toggles" id="tagToggles">
+          <div class="no-tags">
+            Click "Update Toggle Options" to see toggle controls for your words
+          </div>
         </div>
       </div>
 
       <div class="section">
-        <h3>Content Categories to Blur</h3>
+        <h3>Quick Categories (Optional)</h3>
         <div class="category-grid">
           <div class="category-item">
             <label class="toggle-switch">

@@ -140,8 +140,10 @@ document.addEventListener('DOMContentLoaded', function () {
   const categoryCheckboxes = {};
   const customWordsTextarea = document.getElementById('customWords');
   const saveBtn = document.getElementById('saveBtn');
+  const updateTogglesBtn = document.getElementById('updateTogglesBtn');
   const status = document.getElementById('status');
   const activeCount = document.getElementById('activeCount');
+  const tagTogglesContainer = document.getElementById('tagToggles');
 
   // Initialize category checkboxes
   Object.keys(CATEGORIES).forEach((category) => {
@@ -157,6 +159,9 @@ document.addEventListener('DOMContentLoaded', function () {
   // Save button click handler
   saveBtn.addEventListener('click', saveSettings);
 
+  // Update toggles button click handler
+  updateTogglesBtn.addEventListener('click', updateTagToggles);
+
   // Update active count when toggles change
   Object.values(categoryCheckboxes).forEach((checkbox) => {
     checkbox.addEventListener('change', updateActiveCount);
@@ -164,7 +169,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   function loadSettings() {
     chrome.storage.sync.get(
-      ['activeCategories', 'customWords'],
+      ['activeCategories', 'customWords', 'tagLikeToggles'],
       function (result) {
         // Load category toggles
         if (result.activeCategories) {
@@ -181,9 +186,66 @@ document.addEventListener('DOMContentLoaded', function () {
           customWordsTextarea.value = result.customWords.join(', ');
         }
 
+        // Load existing toggles if they exist
+        if (result.customWords && result.customWords.length > 0) {
+          updateTagToggles();
+        }
+
         updateActiveCount();
       }
     );
+  }
+
+  function updateTagToggles() {
+    const customWords = customWordsTextarea.value.trim();
+    const words = customWords
+      .split(',')
+      .map((word) => word.trim())
+      .filter((word) => word.length > 0);
+
+    // Clear existing toggles
+    tagTogglesContainer.innerHTML = '';
+
+    if (words.length === 0) {
+      tagTogglesContainer.innerHTML =
+        '<div class="no-tags">No words entered. Add words and click "Update Toggle Options"</div>';
+      return;
+    }
+
+    // Load saved toggle states
+    chrome.storage.sync.get(['tagLikeToggles'], function (result) {
+      const savedToggles = result.tagLikeToggles || {};
+
+      words.forEach((word) => {
+        const toggleItem = document.createElement('div');
+        toggleItem.className = 'tag-toggle-item';
+
+        const toggleId = `toggle-${word.toLowerCase().replace(/\s+/g, '-')}`;
+        const isChecked = savedToggles[word] || false;
+
+        toggleItem.innerHTML = `
+          <label class="toggle-switch">
+            <input type="checkbox" id="${toggleId}" ${
+          isChecked ? 'checked' : ''
+        }>
+            <span class="slider"></span>
+          </label>
+          <span class="tag-toggle-label">Blur "${word}"-like images?</span>
+        `;
+
+        tagTogglesContainer.appendChild(toggleItem);
+
+        // Add event listener to save toggle state
+        const checkbox = toggleItem.querySelector('input');
+        checkbox.addEventListener('change', function () {
+          savedToggles[word] = this.checked;
+          chrome.storage.sync.set({ tagLikeToggles: savedToggles });
+          updateActiveCount();
+        });
+      });
+
+      updateActiveCount();
+    });
   }
 
   function saveSettings() {
@@ -201,6 +263,21 @@ document.addEventListener('DOMContentLoaded', function () {
       .map((word) => word.trim().toLowerCase())
       .filter((word) => word.length > 0);
 
+    // Get tag-like toggle states
+    const tagLikeToggles = {};
+    const tagToggleCheckboxes = tagTogglesContainer.querySelectorAll(
+      'input[type="checkbox"]'
+    );
+    tagToggleCheckboxes.forEach((checkbox) => {
+      const label = checkbox
+        .closest('.tag-toggle-item')
+        .querySelector('.tag-toggle-label');
+      const word = label.textContent.match(/"([^"]+)"/)?.[1];
+      if (word) {
+        tagLikeToggles[word] = checkbox.checked;
+      }
+    });
+
     // Build complete blocklist
     const completeBlocklist = [];
 
@@ -213,6 +290,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Add custom words
     completeBlocklist.push(...customWordsList);
+
+    // Add "-like" variations for toggled words
+    Object.keys(tagLikeToggles).forEach((word) => {
+      if (tagLikeToggles[word]) {
+        completeBlocklist.push(`${word.toLowerCase()}-like`);
+      }
+    });
 
     // Remove duplicates
     const uniqueBlocklist = [...new Set(completeBlocklist)];
@@ -230,6 +314,7 @@ document.addEventListener('DOMContentLoaded', function () {
       {
         activeCategories: activeCategories,
         customWords: customWordsList,
+        tagLikeToggles: tagLikeToggles,
         blocklist: uniqueBlocklist,
       },
       function () {
@@ -258,6 +343,9 @@ document.addEventListener('DOMContentLoaded', function () {
       .trim()
       .split(',')
       .filter((w) => w.trim()).length;
+    const tagLikeCount = tagTogglesContainer.querySelectorAll(
+      'input[type="checkbox"]:checked'
+    ).length;
 
     let countText = '';
     if (activeCount > 0) {
@@ -266,6 +354,10 @@ document.addEventListener('DOMContentLoaded', function () {
     if (customWordsCount > 0) {
       if (countText) countText += ', ';
       countText += `${customWordsCount} custom word(s)`;
+    }
+    if (tagLikeCount > 0) {
+      if (countText) countText += ', ';
+      countText += `${tagLikeCount} "-like" variation(s)`;
     }
 
     document.getElementById('activeCount').textContent =
