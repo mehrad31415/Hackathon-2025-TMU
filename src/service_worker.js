@@ -13,33 +13,31 @@ const GEMINI_API_URL =
   'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent';
 
 // Default blocklist (fallback) - use let instead of const
-let INITIAL_BLOCKLIST_TERMS = [
-  'snake', // keep "snake" if you still care
-  'spider', // …add as many words or phrases as you like
-  'frog',
-  'gun', // ← example: blur weapons
-  'blood',
-].map((w) => w.toLowerCase());
+let BLOCKLIST = ['snake', 'spider', 'frog', 'gun', 'blood'].map((w) =>
+  w.toLowerCase()
+);
 
 // Load blocklist from storage
 async function loadBlocklist() {
   try {
     const result = await chrome.storage.sync.get(['blocklist']);
     if (result.blocklist) {
-      INITIAL_BLOCKLIST_TERMS = result.blocklist;
-      LOG('Loaded blocklist from storage:', INITIAL_BLOCKLIST_TERMS);
+      BLOCKLIST = result.blocklist;
+      LOG('Loaded blocklist from storage:', BLOCKLIST);
     } else {
-      LOG('Using default blocklist:', INITIAL_BLOCKLIST_TERMS);
+      LOG('Using default blocklist:', BLOCKLIST);
     }
+
+    // Expand the blocklist after loading
+    expandBlocklist();
   } catch (error) {
     LOG('Error loading blocklist, using default:', error);
+    expandBlocklist();
   }
 }
 
 // Load settings on startup
 loadBlocklist();
-
-let BLOCKLIST = []; // This will be populated dynamically
 
 // Simple cache for expanded terms to avoid redundant API calls
 const expandedTermsCache = new Map();
@@ -110,11 +108,9 @@ Respond with a comma-separated list of the matching cleaned labels, and nothing 
  */
 async function expandBlocklist() {
   LOG('Expanding blocklist using Gemini API...');
-  const newBlocklist = new Set(
-    INITIAL_BLOCKLIST_TERMS.map((w) => w.toLowerCase())
-  ); // Start with initial terms
+  const newBlocklist = new Set(BLOCKLIST.map((w) => w.toLowerCase())); // Start with initial terms
 
-  for (const term of INITIAL_BLOCKLIST_TERMS) {
+  for (const term of BLOCKLIST) {
     const similarWords = await getSimilarWordsFromGemini(term);
     similarWords.forEach((word) => newBlocklist.add(word));
   }
@@ -126,7 +122,6 @@ class SnakeClassifier {
   constructor() {
     this.model = null;
     this.load();
-    expandBlocklist();
   }
 
   async load() {
@@ -142,25 +137,29 @@ class SnakeClassifier {
       setTimeout(() => this.classify(imgData, url, tabId), RETRY_MS);
       return;
     }
-    if (BLOCKLIST.length === 0 && INITIAL_BLOCKLIST_TERMS.length > 0) {
-      // Check if expansion is still pending
-      LOG('Blocklist not yet expanded, retrying classification...');
-      setTimeout(() => this.classify(imgData, url, tabId), RETRY_MS);
-      return;
-    }
     LOG('classify', url);
     const t0 = performance.now();
     const preds = await this.model.classify(imgData, TOPK);
     const ms = (performance.now() - t0).toFixed(1);
-    // const isSnake = preds.some(
-    //   p => p.className.toLowerCase().includes('snake') && p.probability >= THRESHOLD
-    // );
-    const shouldBlur = preds.some((p) =>
-      BLOCKLIST.some(
+
+    // Find the matching classification tag
+    let classificationTag = 'sensitive content';
+    let shouldBlur = false;
+
+    for (const pred of preds) {
+      const matchedWord = BLOCKLIST.find(
         (word) =>
-          p.className.toLowerCase().includes(word) && p.probability >= THRESHOLD
-      )
-    );
+          pred.className.toLowerCase().includes(word) &&
+          pred.probability >= THRESHOLD
+      );
+
+      if (matchedWord) {
+        shouldBlur = true;
+        classificationTag = pred.className;
+        break;
+      }
+    }
+
     LOG(
       `preds (${ms} ms)`,
       preds.map((p) => `${p.className}:${p.probability.toFixed(2)}`)
@@ -169,6 +168,7 @@ class SnakeClassifier {
       action: 'BLUR_IF_BLOCKLIST',
       url,
       shouldBlur,
+      classificationTag,
     });
   }
 }
@@ -186,21 +186,18 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
     );
     classifier.classify(imgData, url, sender.tab.id);
   } else if (msg.action === 'RELOAD_SETTINGS') {
-    // Reload blocklist and re-expand it when user saves new settings
+    // Reload blocklist when user saves new settings
     loadBlocklist().then(() => {
-      LOG('Settings reloaded, expanding blocklist...');
-      expandBlocklist().then(() => {
-        LOG('Blocklist expanded, notifying all tabs to reprocess images');
+      LOG('Settings reloaded, notifying all tabs to reprocess images');
 
-        // Notify all active tabs to reprocess their images
-        chrome.tabs.query({}, (tabs) => {
-          tabs.forEach((tab) => {
-            chrome.tabs
-              .sendMessage(tab.id, { action: 'REPROCESS_IMAGES' })
-              .catch(() => {
-                // Ignore errors for tabs that don't have content scripts
-              });
-          });
+      // Notify all active tabs to reprocess their images
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach((tab) => {
+          chrome.tabs
+            .sendMessage(tab.id, { action: 'REPROCESS_IMAGES' })
+            .catch(() => {
+              // Ignore errors for tabs that don't have content scripts
+            });
         });
       });
     });

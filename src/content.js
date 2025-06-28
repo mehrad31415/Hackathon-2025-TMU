@@ -7,6 +7,7 @@ const THRESHOLD_MS = 5000; // give fetch fallback max 5 s
 
 const BLUR_WRAPPER = 'ai-blur-wrapper';
 const BLUR_OVERLAY = 'ai-blur-overlay';
+const WARNING_OVERLAY = 'ai-warning-overlay';
 const LOG = (...a) => console.debug('[AI-Blur]', ...a);
 
 /* ---------- inject CSS once ---------- */
@@ -19,6 +20,28 @@ const LOG = (...a) => console.debug('[AI-Blur]', ...a);
       backdrop-filter:blur(30px);
       background:rgba(0,0,0,.3);
       pointer-events:none;
+    }
+    .${WARNING_OVERLAY}{
+      position:absolute;
+      top:8px;
+      left:8px;
+      max-width:calc(100% - 16px);
+      background:rgba(255,255,255,0.9);
+      color:#333;
+      padding:8px 12px;
+      border-radius:4px;
+      font-size:11px;
+      font-family:Arial,sans-serif;
+      border:1px solid rgba(0,0,0,0.1);
+      box-shadow:0 2px 4px rgba(0,0,0,0.1);
+      pointer-events:none;
+      z-index:1000;
+      line-height:1.2;
+      margin-right:8px;
+      word-wrap:break-word;
+    }
+    .${BLUR_WRAPPER}:hover .${WARNING_OVERLAY}{
+      background:rgba(255,255,255,0.95);
     }`;
   (document.head || document.documentElement).appendChild(style);
   LOG('CSS injected');
@@ -29,9 +52,10 @@ function unblurImage(img) {
   img.classList.add('ai-safe'); // CSS lifts the default blur
 }
 
-/* ---------- blur helper ---------- */
-function blurImage(img) {
+/* ---------- blur helper with warning ---------- */
+function blurImage(img, classificationTag = 'sensitive content') {
   if (img.dataset.aiBlurProcessed) return;
+
   const wrap = document.createElement('span');
   wrap.className = BLUR_WRAPPER;
   img.parentNode.insertBefore(wrap, img);
@@ -41,7 +65,14 @@ function blurImage(img) {
   overlay.className = BLUR_OVERLAY;
   wrap.appendChild(overlay);
 
+  // Add warning overlay
+  const warning = document.createElement('div');
+  warning.className = WARNING_OVERLAY;
+  warning.textContent = `Warning: image may contain ${classificationTag}`;
+  wrap.appendChild(warning);
+
   img.dataset.aiBlurProcessed = '1';
+  img.dataset.aiClassificationTag = classificationTag;
 }
 
 /* ---------- util ---------- */
@@ -143,6 +174,7 @@ function reprocessAllImages() {
       wrapper.parentNode.insertBefore(img, wrapper);
       wrapper.remove();
       delete img.dataset.aiBlurProcessed;
+      delete img.dataset.aiClassificationTag;
     }
   });
 
@@ -206,8 +238,17 @@ chrome.runtime.onMessage.addListener((msg) => {
 
     if (msg.shouldBlur) {
       // 🚫  blocked ⇒ keep default blur + overlay
-      targets.forEach(blurImage); // adds heavy overlay once
-      LOG('BLOCKED', targets.length, 'img(s)', msg.url);
+      targets.forEach((img) =>
+        blurImage(img, msg.classificationTag || 'sensitive content')
+      );
+      LOG(
+        'BLOCKED',
+        targets.length,
+        'img(s)',
+        msg.url,
+        'Tag:',
+        msg.classificationTag
+      );
     } else {
       // ✅  safe ⇒ remove default blur
       targets.forEach(unblurImage);
@@ -218,3 +259,79 @@ chrome.runtime.onMessage.addListener((msg) => {
     reprocessAllImages();
   }
 });
+
+/* ---------- context menu listener ---------- */
+document.addEventListener('contextmenu', function (e) {
+  // Check if right-clicked on a blurred image
+  const blurredImg =
+    e.target.closest(`.${BLUR_WRAPPER} img`) ||
+    (e.target.tagName === 'IMG' && e.target.dataset.aiBlurProcessed);
+
+  if (blurredImg) {
+    e.preventDefault();
+
+    // Create custom context menu
+    const contextMenu = document.createElement('div');
+    contextMenu.style.cssText = `
+      position: fixed;
+      top: ${e.clientY}px;
+      left: ${e.clientX}px;
+      background: white;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+      z-index: 10000;
+      font-family: Arial, sans-serif;
+      font-size: 12px;
+      min-width: 150px;
+    `;
+
+    const menuItem = document.createElement('div');
+    menuItem.style.cssText = `
+      padding: 8px 12px;
+      cursor: pointer;
+      border-bottom: 1px solid #eee;
+      color: #000;
+      font-weight: 500;
+    `;
+    menuItem.textContent = 'Unblur this image';
+    menuItem.onmouseover = () => (menuItem.style.backgroundColor = '#f0f0f0');
+    menuItem.onmouseout = () => (menuItem.style.backgroundColor = 'white');
+    menuItem.onclick = () => {
+      unblurSpecificImage(blurredImg);
+      document.body.removeChild(contextMenu);
+    };
+
+    contextMenu.appendChild(menuItem);
+    document.body.appendChild(contextMenu);
+
+    // Remove context menu when clicking elsewhere
+    const removeMenu = () => {
+      if (document.body.contains(contextMenu)) {
+        document.body.removeChild(contextMenu);
+      }
+      document.removeEventListener('click', removeMenu);
+    };
+
+    setTimeout(() => document.addEventListener('click', removeMenu), 0);
+  }
+});
+
+/* ---------- unblur specific image ---------- */
+function unblurSpecificImage(img) {
+  const wrapper = img.closest(`.${BLUR_WRAPPER}`);
+  if (wrapper) {
+    // Move image back to original position
+    wrapper.parentNode.insertBefore(img, wrapper);
+    wrapper.remove();
+
+    // Remove blur processing data
+    delete img.dataset.aiBlurProcessed;
+    delete img.dataset.aiClassificationTag;
+
+    // Mark as safe
+    img.classList.add('ai-safe');
+
+    LOG('Manually unblurred image:', img.src);
+  }
+}
