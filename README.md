@@ -80,7 +80,7 @@ Here is how the **SafeWeb** Chrome extension works at a high level:
    - This pixel data, along with the image URL and tab ID, is sent to the service worker via `chrome.runtime.sendMessage`.
 
 6. **Image Classification and Decision**
-   - The service worker receives the image data, uses the **MobileNet model** to classify the content, and matches the top predictions against the **expanded blocklist**.
+   - The service worker receives the image data, uses the **MobileNet model** to classify the content, and matches the top predictions against the **expanded blocklist**. The image classification is supplemented by a parser that parses the **alt** tags of the images.
    - If any match meets the defined probability threshold, it sends a blur instruction back to the content script.
 
 7. **Blurring and Overlaying**
