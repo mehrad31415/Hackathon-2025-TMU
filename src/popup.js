@@ -41,7 +41,6 @@ const CATEGORIES = {
     'manga',
     'cartoon',
     'animation',
-    'adult',
     'explicit',
     'nsfw',
     'pornographic',
