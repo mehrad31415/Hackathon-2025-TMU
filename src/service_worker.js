@@ -1,11 +1,12 @@
 /*  service-worker with verbose logging (ES-module)  */
-import '@tensorflow/tfjs-core';           // core TF operations (tensors, math)
-import '@tensorflow/tfjs-backend-webgl';  // uses WebGL backend in browser
+import * as tf from '@tensorflow/tfjs';
 import * as mobilenet from '@tensorflow-models/mobilenet';
 
+// service-worker.js (excerpt with threshold change)
 const IMAGE_SIZE = 224;
 const TOPK = 3;
-const THRESHOLD = 0.01;
+// Raised THRESHOLD from 0.01 to 0.05 to reduce false positives
+const THRESHOLD = 0.05;
 const RETRY_MS = 3000;
 const LOG = (...a) => console.info('[AI-Blur][SW]', ...a);
 

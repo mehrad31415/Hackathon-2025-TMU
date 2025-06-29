@@ -4,22 +4,16 @@
   "description": "Chrome Extension (MV3) using MobileNet + TFJS",
   "license": "Apache-2.0",
   "scripts": {
-    "build": "parcel build src/service_worker.js src/content.js src/popup.js src/popup.html src/default_blur.css --dist-dir dist/src && mkdir -p dist && cp -a public/. dist/",
-    "watch": "parcel watch src/service_worker.js src/content.js src/popup.js src/popup.html src/default_blur.css --dist-dir dist/src",
-    "clean": "rm -rf .parcel-cache dist node_modules package-lock.json && echo 'Workspace wiped — run npm install or docker build next.'"
+    "clean": "rm -rf dist node_modules && echo 'dist/ wiped'",
+    "build": "node build.cjs",
+    "watch": "nodemon --watch src --ext js,html,css --exec \"node build.cjs\""
   },
   "dependencies": {
-    "@tensorflow-models/mobilenet": "2.1.1",
-    "@tensorflow/tfjs-core": "4.22.0",
-    "@tensorflow/tfjs-backend-webgl": "4.22.0"
+    "@tensorflow-models/mobilenet": "^2.1.0",
+    "@tensorflow/tfjs": "^3.13.0"
   },
   "devDependencies": {
-    "parcel": "^2.15.4",
-    "buffer": "^6.0.3",
-    "process": "^0.11.10",
-    "clang-format": "^1.8.0"
-  },
-  "resolutions": {
-    "node-fetch": "2.6.7"
+    "esbuild": "^0.18.0",
+    "nodemon": "^2.0.0"
   }
 }
