@@ -5,7 +5,7 @@ This Chrome extension (Manifest v3) lets you browse with custom image filtering:
 To build the extension, use the command:
 
 ```sh
-npm build clean
+npm run clean
 npm i
 npm run build
 ```
@@ -37,7 +37,6 @@ From here, you can:
 
 > The extension will automatically blur matching images as you browse. No refresh needed!
 
-![install page illustration](./install.png "install page")
 
 
 Using the extension
