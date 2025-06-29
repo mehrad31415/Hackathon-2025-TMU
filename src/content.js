@@ -323,7 +323,7 @@ function consider(img) {
   const alt = (img.alt || img.getAttribute('aria-label') || '').toLowerCase();
   const hit = ALT_BLOCKLIST.find((w) => alt.includes(w));
   if (hit) {
-    blurImage(img, `matched alt: ${hit}`);
+    blurImage(img, hit); // Just pass the matched word, not "matched alt: word"
     img.dataset[ALT_FLAG] = '1';
     return; // skip pixel classification
   }
