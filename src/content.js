@@ -1,14 +1,40 @@
 /**  AI-Snake-Blur content script  **/
 
 /* ---------- constants ---------- */
-const IMAGE_SIZE = 224; // MobileNet input
-const MIN_IMG_PX = 128; // skip tiny icons
-const THRESHOLD_MS = 5000; // give fetch fallback max 5 s
+const IMAGE_SIZE = 224;          // MobileNet input
+const MIN_IMG_PX = 128;          // skip tiny icons
+const THRESHOLD_MS = 5000;       // give fetch fallback max 5 s
 
 const BLUR_WRAPPER = 'ai-blur-wrapper';
 const BLUR_OVERLAY = 'ai-blur-overlay';
 const WARNING_OVERLAY = 'ai-warning-overlay';
+const ALT_FLAG = 'aiBlurAlt';    // marks images blurred via alt-text
 const LOG = (...a) => console.debug('[AI-Blur]', ...a);
+
+/* ---------- ALT-text block-list ---------- */
+let ALT_BLOCKLIST = [];
+let blocklistReady = false;
+const PENDING_IMGS = new Set();      // imgs seen before list ready
+
+function loadAltBlocklist() {
+  chrome.storage.sync.get(['blocklist'], (res) => {
+    ALT_BLOCKLIST = (res.blocklist || []).map((w) => w.toLowerCase());
+    blocklistReady = true;
+    LOG('ALT block-list loaded:', ALT_BLOCKLIST);
+    /* re-evaluate any images we queued while waiting */
+    PENDING_IMGS.forEach(consider);
+    PENDING_IMGS.clear();
+  });
+}
+loadAltBlocklist();
+
+/* reload on settings change */
+chrome.runtime.onMessage.addListener((m) => {
+  if (m.action === 'REPROCESS_IMAGES') {
+    blocklistReady = false;
+    loadAltBlocklist();   // when done it will reprocess via consider()
+  }
+});
 
 /* ---------- inject CSS once ---------- */
 (() => {
@@ -72,105 +98,66 @@ const LOG = (...a) => console.debug('[AI-Blur]', ...a);
 })();
 
 /* ---------- cache management ---------- */
-const imageCache = new Map(); // url -> { shouldBlur, classificationTag, timestamp }
-const userUnblurredImages = new Set(); // urls that user manually unblurred
-
-// Load user unblurred images from storage
-chrome.storage.local.get(['userUnblurredImages'], function (result) {
-  if (result.userUnblurredImages) {
-    result.userUnblurredImages.forEach((url) => userUnblurredImages.add(url));
-  }
+const imageCache = new Map();  // url → { shouldBlur, classificationTag, timestamp }
+const userUnblurredImages = new Set();
+chrome.storage.local.get(['userUnblurredImages'], (res) => {
+  (res.userUnblurredImages || []).forEach((u) => userUnblurredImages.add(u));
 });
 
 /* ---------- find proper container for overlay ---------- */
 function findOverlayContainer(img) {
-  // First, try to find a parent anchor tag with href
   const anchor = img.closest('a[href]');
-  if (anchor) {
-    const rect = anchor.getBoundingClientRect();
-    if (rect.width > 0 && rect.height > 0) {
-      LOG('Using anchor container:', anchor);
-      return anchor;
-    }
-  }
+  if (anchor && anchor.getBoundingClientRect().width) return anchor;
 
-  // Walk up the DOM tree to find an element with actual dimensions
-  let element = img.parentElement;
-  while (element && element !== document.body) {
-    const rect = element.getBoundingClientRect();
-    if (rect.width > 0 && rect.height > 0) {
-      LOG('Using parent container:', element);
-      return element;
-    }
-    element = element.parentElement;
+  let el = img.parentElement;
+  while (el && el !== document.body) {
+    if (el.getBoundingClientRect().width) return el;
+    el = el.parentElement;
   }
-
-  // Fallback to img's parent if nothing else works
-  LOG('Using img parent as fallback:', img.parentElement);
-  return img.parentElement;
+  return img.parentElement;          // fallback
 }
 
 /* ---------- un-blur helper ---------- */
 function unblurImage(img) {
-  img.classList.add('ai-safe'); // CSS lifts the default blur
-  img.classList.remove('ai-blurred-img'); // Show the image
+  if (img.dataset[ALT_FLAG] === '1') return;   // alt-blurred stays blurred
+  img.classList.add('ai-safe');
+  img.classList.remove('ai-blurred-img');
 }
 
 /* ---------- blur helper with warning ---------- */
 function blurImage(img, classificationTag = 'sensitive content') {
   if (img.dataset.aiBlurProcessed) return;
 
-  // Find the proper container
   const container = findOverlayContainer(img);
-  if (!container) {
-    LOG('No suitable container found for:', img.src);
-    return;
-  }
-
-  // Ensure container can position absolutely
-  const containerStyle = window.getComputedStyle(container);
-  if (containerStyle.position === 'static') {
+  if (!container) return;
+  if (getComputedStyle(container).position === 'static')
     container.style.position = 'relative';
-  }
 
-  // Hide the original image
   img.classList.add('ai-blurred-img');
 
-  // Create overlay wrapper
-  const overlayWrapper = document.createElement('div');
-  overlayWrapper.className = BLUR_WRAPPER;
-  overlayWrapper.dataset.aiImageUrl = img.src;
+  const wrap = document.createElement('div');
+  wrap.className = BLUR_WRAPPER;
+  wrap.dataset.aiImageUrl = img.src;
 
-  // Create blur overlay
-  const blurOverlay = document.createElement('div');
-  blurOverlay.className = BLUR_OVERLAY;
-  overlayWrapper.appendChild(blurOverlay);
-
-  // Create warning overlay
-  const warningOverlay = document.createElement('div');
-  warningOverlay.className = WARNING_OVERLAY;
-  warningOverlay.textContent = `Warning: image may contain ${classificationTag}`;
-  overlayWrapper.appendChild(warningOverlay);
-
-  // Add click handler to unblur
-  overlayWrapper.addEventListener('click', function (e) {
+  wrap.appendChild(Object.assign(document.createElement('div'), {
+    className: BLUR_OVERLAY,
+  }));
+  wrap.appendChild(Object.assign(document.createElement('div'), {
+    className: WARNING_OVERLAY,
+    textContent: `Warning: image may contain ${classificationTag}`,
+  }));
+  wrap.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
     unblurSpecificImage(img);
   });
-
-  // Append overlay to container
-  container.appendChild(overlayWrapper);
+  container.appendChild(wrap);
 
   img.dataset.aiBlurProcessed = '1';
   img.dataset.aiClassificationTag = classificationTag;
-  img.dataset.aiOverlayContainer = container;
-
-  LOG('Applied blur overlay to container:', container);
 }
 
 /* ---------- util ---------- */
-const processedUrls = new Set();
 const imgsBySrc = (url) =>
   Array.from(document.images).filter((im) => im.src === url);
 
@@ -179,73 +166,44 @@ function drawToCanvas(imgLike) {
   const c =
     typeof OffscreenCanvas !== 'undefined'
       ? new OffscreenCanvas(IMAGE_SIZE, IMAGE_SIZE)
-      : (() => {
-          const el = document.createElement('canvas');
-          el.width = IMAGE_SIZE;
-          el.height = IMAGE_SIZE;
-          return el;
-        })();
+      : Object.assign(document.createElement('canvas'), {
+          width: IMAGE_SIZE,
+          height: IMAGE_SIZE,
+        });
   const ctx = c.getContext('2d');
   ctx.drawImage(imgLike, 0, 0, IMAGE_SIZE, IMAGE_SIZE);
   return ctx.getImageData(0, 0, IMAGE_SIZE, IMAGE_SIZE);
 }
-
 async function fetchAndDecode(url) {
-  // timeout helper
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), THRESHOLD_MS);
-
+  const t = setTimeout(() => ctrl.abort(), THRESHOLD_MS);
   try {
-    const resp = await fetch(url, { mode: 'cors', signal: ctrl.signal });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const blob = await resp.blob();
-    const objURL = URL.createObjectURL(blob);
+    const r = await fetch(url, { mode: 'cors', signal: ctrl.signal });
+    if (!r.ok) throw new Error();
+    const blob = await r.blob();
+    const obj = URL.createObjectURL(blob);
     const img = new Image();
-    img.src = objURL;
+    img.src = obj;
     await img.decode();
-    URL.revokeObjectURL(objURL);
+    URL.revokeObjectURL(obj);
     return img;
   } finally {
-    clearTimeout(timer);
+    clearTimeout(t);
   }
 }
 
 /* ---------- main classify by URL ---------- */
 async function classifyUrl(url) {
-  // Check if user manually unblurred this image
-  if (userUnblurredImages.has(url)) {
-    LOG('Image manually unblurred by user, skipping:', url);
-    return;
-  }
-
-  // Check cache for existing result
+  if (userUnblurredImages.has(url)) return;
   const cached = imageCache.get(url);
-  if (cached) {
-    LOG('Using cached result for:', url, cached);
-    applyCachedResult(url, cached.shouldBlur, cached.classificationTag);
-    return;
-  }
+  if (cached) return applyCachedResult(url, cached.shouldBlur, cached.classificationTag);
 
   let imgData;
-  /* 1️⃣  try drawing an existing <img> if we have one */
   const domImg = imgsBySrc(url)[0];
-  if (domImg) {
-    try {
-      imgData = drawToCanvas(domImg);
-    } catch (e) {
-      LOG('tainted DOM canvas, fallback to fetch', url);
-    }
-  }
-
-  /* 2️⃣  CORS-safe fallback: fetch + objectURL */
+  try { imgData = drawToCanvas(domImg); } catch {}
   if (!imgData) {
-    try {
-      const fetchedImg = await fetchAndDecode(url);
-      imgData = drawToCanvas(fetchedImg);
-    } catch (err) {
-      LOG('fetch fallback failed', url, err.message);
-      return; // give up
-    }
+    try { imgData = drawToCanvas(await fetchAndDecode(url)); }
+    catch { return; }
   }
 
   chrome.runtime.sendMessage({
@@ -255,81 +213,63 @@ async function classifyUrl(url) {
     height: IMAGE_SIZE,
     url,
   });
-  LOG('→ CLASSIFY_IMAGE', url);
 }
 
 /* ---------- apply cached result ---------- */
 function applyCachedResult(url, shouldBlur, classificationTag) {
   const targets = imgsBySrc(url);
-
-  if (shouldBlur) {
-    targets.forEach((img) => blurImage(img, classificationTag));
-    LOG('Applied cached BLUR result:', targets.length, 'img(s)', url);
-  } else {
-    targets.forEach(unblurImage);
-    LOG('Applied cached SAFE result:', targets.length, 'img(s)', url);
-  }
+  (shouldBlur ? blurImage : unblurImage)(targets[0] || {}, classificationTag);
+  targets.slice(1).forEach((img) =>
+    shouldBlur ? blurImage(img, classificationTag) : unblurImage(img)
+  );
 }
 
 /* ---------- decide whether to queue a DOM <img> ---------- */
 function consider(img) {
-  if (!img.complete) return; // still loading
+  if (!blocklistReady) {    // wait until list is ready
+    PENDING_IMGS.add(img);
+    return;
+  }
+  if (!img.complete) return;
   if (Math.max(img.naturalWidth, img.naturalHeight) < MIN_IMG_PX) return;
+
+  /* ALT-text / aria-label priority */
+  const alt = (img.alt || img.getAttribute('aria-label') || '').toLowerCase();
+  const hit = ALT_BLOCKLIST.find((w) => alt.includes(w));
+  if (hit) {
+    blurImage(img, `matched alt: ${hit}`);
+    img.dataset[ALT_FLAG] = '1';
+    return;                          // skip pixel classification
+  }
+
   classifyUrl(img.src);
 }
 
-/* ---------- reprocess all images on page ---------- */
+/* ---------- reprocess helper ---------- */
 function reprocessAllImages() {
-  LOG('Reprocessing all images on page');
-
-  // Clear cache to force reprocessing
   imageCache.clear();
-
-  // Remove all existing blur overlays
-  document.querySelectorAll(`.${BLUR_WRAPPER}`).forEach((overlay) => {
-    overlay.remove();
-  });
-
-  // Show all images and remove blur classes
-  document.querySelectorAll('img.ai-blurred-img').forEach((img) => {
-    img.classList.remove('ai-blurred-img');
-  });
-
-  // Remove all ai-safe classes
-  document.querySelectorAll('img.ai-safe').forEach((img) => {
-    img.classList.remove('ai-safe');
-  });
-
-  // Clear processing data
-  document.querySelectorAll('img[data-ai-blur-processed]').forEach((img) => {
+  document.querySelectorAll(`.${BLUR_WRAPPER}`).forEach((w) => w.remove());
+  document.querySelectorAll('img').forEach((img) => {
+    img.classList.remove('ai-blurred-img', 'ai-safe');
     delete img.dataset.aiBlurProcessed;
     delete img.dataset.aiClassificationTag;
-    delete img.dataset.aiOverlayContainer;
+    delete img.dataset[ALT_FLAG];
   });
-
-  // Reprocess all images
-  document.querySelectorAll('img').forEach(consider);
+  Array.from(document.images).forEach(consider);
 }
 
 /* ---------- initial sweep ---------- */
-document.querySelectorAll('img').forEach(consider);
+Array.from(document.images).forEach(consider);
 
-/* ---------- IntersectionObserver for infinite scroll ---------- */
+/* ---------- observers ---------- */
 const io = new IntersectionObserver(
-  (entries) => {
-    entries.forEach((e) => {
-      if (e.isIntersecting) consider(e.target);
-    });
-  },
+  (entries) => entries.forEach((e) => e.isIntersecting && consider(e.target)),
   { root: null, threshold: 0 }
 );
-
 document.querySelectorAll('img').forEach((img) => io.observe(img));
 
-/* ---------- MutationObserver: new nodes + src/srcset changes ---------- */
 new MutationObserver((muts) => {
-  for (const m of muts) {
-    /* new nodes */
+  muts.forEach((m) => {
     m.addedNodes.forEach((n) => {
       if (n.tagName === 'IMG') {
         io.observe(n);
@@ -341,64 +281,50 @@ new MutationObserver((muts) => {
         });
       }
     });
-    /* src / srcset change on existing img */
-    if (m.type === 'attributes' && m.target.tagName === 'IMG') {
-      if (m.attributeName === 'src' || m.attributeName === 'srcset') {
-        consider(m.target);
-      }
+    if (
+      m.type === 'attributes' &&
+      m.target.tagName === 'IMG' &&
+      ['src', 'srcset', 'alt', 'aria-label'].includes(m.attributeName)
+    ) {
+      consider(m.target);
     }
-  }
+  });
 }).observe(document.documentElement, {
   childList: true,
   subtree: true,
   attributes: true,
-  attributeFilter: ['src', 'srcset'],
+  attributeFilter: ['src', 'srcset', 'alt', 'aria-label'],
 });
 
 /* ---------- verdict listener ---------- */
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.action === 'BLUR_IF_BLOCKLIST') {
-    const { url, shouldBlur, classificationTag } = msg;
-
-    // Cache the result
-    imageCache.set(url, {
-      shouldBlur,
-      classificationTag: classificationTag || 'sensitive content',
+    imageCache.set(msg.url, {
+      shouldBlur: msg.shouldBlur,
+      classificationTag: msg.classificationTag || 'sensitive content',
       timestamp: Date.now(),
     });
-
-    // Apply the result
-    applyCachedResult(url, shouldBlur, classificationTag);
+    applyCachedResult(msg.url, msg.shouldBlur, msg.classificationTag);
   } else if (msg.action === 'REPROCESS_IMAGES') {
-    // Reprocess all images when settings are updated
-    reprocessAllImages();
+    reprocessAllImages();            // also reloads ALT block-list via listener
   }
 });
 
 /* ---------- unblur specific image ---------- */
 function unblurSpecificImage(img) {
-  // Remove the overlay
-  const overlay = document.querySelector(`[data-ai-image-url="${img.src}"]`);
-  if (overlay) {
-    overlay.remove();
-  }
+  const overlay = document.querySelector(
+    `[data-ai-image-url=\"${img.src}\"]`
+  );
+  if (overlay) overlay.remove();
 
-  // Show the image
   img.classList.remove('ai-blurred-img');
-
-  // Remove processing data
   delete img.dataset.aiBlurProcessed;
   delete img.dataset.aiClassificationTag;
-  delete img.dataset.aiOverlayContainer;
+  delete img.dataset[ALT_FLAG];
 
-  // Mark as safe
   img.classList.add('ai-safe');
-
-  // Add to user unblurred images and save to storage
   userUnblurredImages.add(img.src);
   chrome.storage.local.set({
     userUnblurredImages: Array.from(userUnblurredImages),
   });
-
-  LOG('Manually unblurred image:', img.src);
 }
