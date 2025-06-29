@@ -301,13 +301,12 @@ document.addEventListener('DOMContentLoaded', function () {
     // Remove duplicates
     const uniqueBlocklist = [...new Set(completeBlocklist)];
 
-    if (uniqueBlocklist.length === 0) {
-      showStatus(
-        'Please select at least one category or add custom words.',
-        'error'
-      );
-      return;
-    }
+    // Allow empty blocklist - user wants to disable all blurring
+    const blocklistLength = uniqueBlocklist.length;
+    const statusMessage =
+      blocklistLength === 0
+        ? 'Settings saved! All image blurring is now disabled.'
+        : `Settings saved! ${blocklistLength} word(s) will be blurred. Reprocessing current page...`;
 
     // Save to Chrome storage
     chrome.storage.sync.set(
@@ -318,10 +317,7 @@ document.addEventListener('DOMContentLoaded', function () {
         blocklist: uniqueBlocklist,
       },
       function () {
-        showStatus(
-          `Settings saved! ${uniqueBlocklist.length} word(s) will be blurred. Reprocessing current page...`,
-          'success'
-        );
+        showStatus(statusMessage, 'success');
         updateActiveCount();
 
         // Notify service worker to reload settings and reprocess images
@@ -360,8 +356,9 @@ document.addEventListener('DOMContentLoaded', function () {
       countText += `${tagLikeCount} "-like" variation(s)`;
     }
 
-    document.getElementById('activeCount').textContent =
-      countText || 'No categories active';
+    const finalText =
+      countText || 'No blurring active - all images will be shown';
+    document.getElementById('activeCount').textContent = finalText;
   }
 
   function showStatus(message, type) {

@@ -15,9 +15,10 @@ const LOG = (...a) => console.debug('[AI-Blur]', ...a);
   const style = document.createElement('style');
   style.textContent = `
     .${BLUR_WRAPPER}{
-      display:inline-block;
-      position:relative;
+      position:absolute;
+      inset:0;
       cursor:pointer;
+      z-index:10;
     }
     .${BLUR_WRAPPER}:hover .${WARNING_OVERLAY}{
       background:rgba(255,255,255,0.95);
@@ -62,6 +63,9 @@ const LOG = (...a) => console.debug('[AI-Blur]', ...a);
       line-height:1.2;
       margin-right:8px;
       word-wrap:break-word;
+    }
+    .ai-blurred-img{
+      visibility:hidden !important;
     }`;
   (document.head || document.documentElement).appendChild(style);
   LOG('CSS injected');
@@ -78,39 +82,91 @@ chrome.storage.local.get(['userUnblurredImages'], function (result) {
   }
 });
 
+/* ---------- find proper container for overlay ---------- */
+function findOverlayContainer(img) {
+  // First, try to find a parent anchor tag with href
+  const anchor = img.closest('a[href]');
+  if (anchor) {
+    const rect = anchor.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      LOG('Using anchor container:', anchor);
+      return anchor;
+    }
+  }
+
+  // Walk up the DOM tree to find an element with actual dimensions
+  let element = img.parentElement;
+  while (element && element !== document.body) {
+    const rect = element.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      LOG('Using parent container:', element);
+      return element;
+    }
+    element = element.parentElement;
+  }
+
+  // Fallback to img's parent if nothing else works
+  LOG('Using img parent as fallback:', img.parentElement);
+  return img.parentElement;
+}
+
 /* ---------- un-blur helper ---------- */
 function unblurImage(img) {
   img.classList.add('ai-safe'); // CSS lifts the default blur
+  img.classList.remove('ai-blurred-img'); // Show the image
 }
 
 /* ---------- blur helper with warning ---------- */
 function blurImage(img, classificationTag = 'sensitive content') {
   if (img.dataset.aiBlurProcessed) return;
 
-  const wrap = document.createElement('span');
-  wrap.className = BLUR_WRAPPER;
-  img.parentNode.insertBefore(wrap, img);
-  wrap.appendChild(img);
+  // Find the proper container
+  const container = findOverlayContainer(img);
+  if (!container) {
+    LOG('No suitable container found for:', img.src);
+    return;
+  }
 
-  const overlay = document.createElement('div');
-  overlay.className = BLUR_OVERLAY;
-  wrap.appendChild(overlay);
+  // Ensure container can position absolutely
+  const containerStyle = window.getComputedStyle(container);
+  if (containerStyle.position === 'static') {
+    container.style.position = 'relative';
+  }
 
-  // Add warning overlay
-  const warning = document.createElement('div');
-  warning.className = WARNING_OVERLAY;
-  warning.textContent = `Warning: image may contain ${classificationTag}`;
-  wrap.appendChild(warning);
+  // Hide the original image
+  img.classList.add('ai-blurred-img');
+
+  // Create overlay wrapper
+  const overlayWrapper = document.createElement('div');
+  overlayWrapper.className = BLUR_WRAPPER;
+  overlayWrapper.dataset.aiImageUrl = img.src;
+
+  // Create blur overlay
+  const blurOverlay = document.createElement('div');
+  blurOverlay.className = BLUR_OVERLAY;
+  overlayWrapper.appendChild(blurOverlay);
+
+  // Create warning overlay
+  const warningOverlay = document.createElement('div');
+  warningOverlay.className = WARNING_OVERLAY;
+  warningOverlay.textContent = `Warning: image may contain ${classificationTag}`;
+  overlayWrapper.appendChild(warningOverlay);
 
   // Add click handler to unblur
-  wrap.addEventListener('click', function (e) {
+  overlayWrapper.addEventListener('click', function (e) {
     e.preventDefault();
     e.stopPropagation();
     unblurSpecificImage(img);
   });
 
+  // Append overlay to container
+  container.appendChild(overlayWrapper);
+
   img.dataset.aiBlurProcessed = '1';
   img.dataset.aiClassificationTag = classificationTag;
+  img.dataset.aiOverlayContainer = container;
+
+  LOG('Applied blur overlay to container:', container);
 }
 
 /* ---------- util ---------- */
@@ -229,20 +285,26 @@ function reprocessAllImages() {
   // Clear cache to force reprocessing
   imageCache.clear();
 
-  // Remove all existing blur wrappers and overlays
-  document.querySelectorAll(`.${BLUR_WRAPPER}`).forEach((wrapper) => {
-    const img = wrapper.querySelector('img');
-    if (img) {
-      wrapper.parentNode.insertBefore(img, wrapper);
-      wrapper.remove();
-      delete img.dataset.aiBlurProcessed;
-      delete img.dataset.aiClassificationTag;
-    }
+  // Remove all existing blur overlays
+  document.querySelectorAll(`.${BLUR_WRAPPER}`).forEach((overlay) => {
+    overlay.remove();
+  });
+
+  // Show all images and remove blur classes
+  document.querySelectorAll('img.ai-blurred-img').forEach((img) => {
+    img.classList.remove('ai-blurred-img');
   });
 
   // Remove all ai-safe classes
   document.querySelectorAll('img.ai-safe').forEach((img) => {
     img.classList.remove('ai-safe');
+  });
+
+  // Clear processing data
+  document.querySelectorAll('img[data-ai-blur-processed]').forEach((img) => {
+    delete img.dataset.aiBlurProcessed;
+    delete img.dataset.aiClassificationTag;
+    delete img.dataset.aiOverlayContainer;
   });
 
   // Reprocess all images
@@ -315,25 +377,28 @@ chrome.runtime.onMessage.addListener((msg) => {
 
 /* ---------- unblur specific image ---------- */
 function unblurSpecificImage(img) {
-  const wrapper = img.closest(`.${BLUR_WRAPPER}`);
-  if (wrapper) {
-    // Move image back to original position
-    wrapper.parentNode.insertBefore(img, wrapper);
-    wrapper.remove();
-
-    // Remove blur processing data
-    delete img.dataset.aiBlurProcessed;
-    delete img.dataset.aiClassificationTag;
-
-    // Mark as safe
-    img.classList.add('ai-safe');
-
-    // Add to user unblurred images and save to storage
-    userUnblurredImages.add(img.src);
-    chrome.storage.local.set({
-      userUnblurredImages: Array.from(userUnblurredImages),
-    });
-
-    LOG('Manually unblurred image:', img.src);
+  // Remove the overlay
+  const overlay = document.querySelector(`[data-ai-image-url="${img.src}"]`);
+  if (overlay) {
+    overlay.remove();
   }
+
+  // Show the image
+  img.classList.remove('ai-blurred-img');
+
+  // Remove processing data
+  delete img.dataset.aiBlurProcessed;
+  delete img.dataset.aiClassificationTag;
+  delete img.dataset.aiOverlayContainer;
+
+  // Mark as safe
+  img.classList.add('ai-safe');
+
+  // Add to user unblurred images and save to storage
+  userUnblurredImages.add(img.src);
+  chrome.storage.local.set({
+    userUnblurredImages: Array.from(userUnblurredImages),
+  });
+
+  LOG('Manually unblurred image:', img.src);
 }

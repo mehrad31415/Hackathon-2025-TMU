@@ -1,35 +1,43 @@
 {
   "name": "AI Image Blur",
-  "description": "Automatically blurs any image classified as stuff from the blocked list.",
+  "description": "Automatically blurs any image whose label OR alt text matches words in your blocklist.",
   "version": "0.2.0",
-
-  "permissions": ["contextMenus", "tabs", "activeTab", "storage"],
-
-  "host_permissions": ["<all_urls>"],
-
-  "action": {
-    "default_popup": "src/popup.html",
-    "default_title": "AI Image Blur"
-  },
-
+  "manifest_version": 3,
+  "permissions": [
+    "storage",
+    "tabs",
+    "activeTab",
+    "contextMenus"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "background": {
     "service_worker": "src/service_worker.js",
     "type": "module"
   },
-
+  "action": {
+    "default_popup": "src/popup.html",
+    "default_title": "AI Image Blur"
+  },
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*"],
-      "css": ["src/default_blur.css"],
-      "js": ["src/content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "css": [
+        "src/default_blur.css"
+      ],
+      "js": [
+        "src/content.js"
+      ],
       "all_frames": true,
-      "run_at": "document_start"
+      "run_at": "document_idle"
     }
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"
   },
-  "manifest_version": 3,
   "icons": {
     "16": "images/get_started16.png",
     "32": "images/get_started32.png",
