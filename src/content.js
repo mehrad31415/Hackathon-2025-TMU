@@ -14,7 +14,30 @@ const LOG = (...a) => console.debug('[AI-Blur]', ...a);
 (() => {
   const style = document.createElement('style');
   style.textContent = `
-    .${BLUR_WRAPPER}{display:inline-block;position:relative;}
+    .${BLUR_WRAPPER}{
+      display:inline-block;
+      position:relative;
+      cursor:pointer;
+    }
+    .${BLUR_WRAPPER}:hover .${WARNING_OVERLAY}{
+      background:rgba(255,255,255,0.95);
+    }
+    .${BLUR_WRAPPER}:hover::after{
+      content:"Click to unblur";
+      position:absolute;
+      top:50%;
+      left:50%;
+      transform:translate(-50%, -50%);
+      background:rgba(0,0,0,0.8);
+      color:white;
+      padding:8px 12px;
+      border-radius:4px;
+      font-size:12px;
+      font-family:Arial,sans-serif;
+      z-index:3;
+      pointer-events:none;
+      white-space:nowrap;
+    }
     .${BLUR_OVERLAY}{
       position:absolute;inset:0;
       backdrop-filter:blur(30px);
@@ -39,13 +62,21 @@ const LOG = (...a) => console.debug('[AI-Blur]', ...a);
       line-height:1.2;
       margin-right:8px;
       word-wrap:break-word;
-    }
-    .${BLUR_WRAPPER}:hover .${WARNING_OVERLAY}{
-      background:rgba(255,255,255,0.95);
     }`;
   (document.head || document.documentElement).appendChild(style);
   LOG('CSS injected');
 })();
+
+/* ---------- cache management ---------- */
+const imageCache = new Map(); // url -> { shouldBlur, classificationTag, timestamp }
+const userUnblurredImages = new Set(); // urls that user manually unblurred
+
+// Load user unblurred images from storage
+chrome.storage.local.get(['userUnblurredImages'], function (result) {
+  if (result.userUnblurredImages) {
+    result.userUnblurredImages.forEach((url) => userUnblurredImages.add(url));
+  }
+});
 
 /* ---------- un-blur helper ---------- */
 function unblurImage(img) {
@@ -70,6 +101,13 @@ function blurImage(img, classificationTag = 'sensitive content') {
   warning.className = WARNING_OVERLAY;
   warning.textContent = `Warning: image may contain ${classificationTag}`;
   wrap.appendChild(warning);
+
+  // Add click handler to unblur
+  wrap.addEventListener('click', function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    unblurSpecificImage(img);
+  });
 
   img.dataset.aiBlurProcessed = '1';
   img.dataset.aiClassificationTag = classificationTag;
@@ -118,8 +156,19 @@ async function fetchAndDecode(url) {
 
 /* ---------- main classify by URL ---------- */
 async function classifyUrl(url) {
-  if (processedUrls.has(url)) return;
-  processedUrls.add(url);
+  // Check if user manually unblurred this image
+  if (userUnblurredImages.has(url)) {
+    LOG('Image manually unblurred by user, skipping:', url);
+    return;
+  }
+
+  // Check cache for existing result
+  const cached = imageCache.get(url);
+  if (cached) {
+    LOG('Using cached result for:', url, cached);
+    applyCachedResult(url, cached.shouldBlur, cached.classificationTag);
+    return;
+  }
 
   let imgData;
   /* 1️⃣  try drawing an existing <img> if we have one */
@@ -153,6 +202,19 @@ async function classifyUrl(url) {
   LOG('→ CLASSIFY_IMAGE', url);
 }
 
+/* ---------- apply cached result ---------- */
+function applyCachedResult(url, shouldBlur, classificationTag) {
+  const targets = imgsBySrc(url);
+
+  if (shouldBlur) {
+    targets.forEach((img) => blurImage(img, classificationTag));
+    LOG('Applied cached BLUR result:', targets.length, 'img(s)', url);
+  } else {
+    targets.forEach(unblurImage);
+    LOG('Applied cached SAFE result:', targets.length, 'img(s)', url);
+  }
+}
+
 /* ---------- decide whether to queue a DOM <img> ---------- */
 function consider(img) {
   if (!img.complete) return; // still loading
@@ -164,8 +226,8 @@ function consider(img) {
 function reprocessAllImages() {
   LOG('Reprocessing all images on page');
 
-  // Clear processed URLs cache to allow reprocessing
-  processedUrls.clear();
+  // Clear cache to force reprocessing
+  imageCache.clear();
 
   // Remove all existing blur wrappers and overlays
   document.querySelectorAll(`.${BLUR_WRAPPER}`).forEach((wrapper) => {
@@ -234,86 +296,20 @@ new MutationObserver((muts) => {
 /* ---------- verdict listener ---------- */
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.action === 'BLUR_IF_BLOCKLIST') {
-    const targets = imgsBySrc(msg.url);
+    const { url, shouldBlur, classificationTag } = msg;
 
-    if (msg.shouldBlur) {
-      // 🚫  blocked ⇒ keep default blur + overlay
-      targets.forEach((img) =>
-        blurImage(img, msg.classificationTag || 'sensitive content')
-      );
-      LOG(
-        'BLOCKED',
-        targets.length,
-        'img(s)',
-        msg.url,
-        'Tag:',
-        msg.classificationTag
-      );
-    } else {
-      // ✅  safe ⇒ remove default blur
-      targets.forEach(unblurImage);
-      LOG('SAFE', targets.length, 'img(s)', msg.url);
-    }
+    // Cache the result
+    imageCache.set(url, {
+      shouldBlur,
+      classificationTag: classificationTag || 'sensitive content',
+      timestamp: Date.now(),
+    });
+
+    // Apply the result
+    applyCachedResult(url, shouldBlur, classificationTag);
   } else if (msg.action === 'REPROCESS_IMAGES') {
     // Reprocess all images when settings are updated
     reprocessAllImages();
-  }
-});
-
-/* ---------- context menu listener ---------- */
-document.addEventListener('contextmenu', function (e) {
-  // Check if right-clicked on a blurred image
-  const blurredImg =
-    e.target.closest(`.${BLUR_WRAPPER} img`) ||
-    (e.target.tagName === 'IMG' && e.target.dataset.aiBlurProcessed);
-
-  if (blurredImg) {
-    e.preventDefault();
-
-    // Create custom context menu
-    const contextMenu = document.createElement('div');
-    contextMenu.style.cssText = `
-      position: fixed;
-      top: ${e.clientY}px;
-      left: ${e.clientX}px;
-      background: white;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-      z-index: 10000;
-      font-family: Arial, sans-serif;
-      font-size: 12px;
-      min-width: 150px;
-    `;
-
-    const menuItem = document.createElement('div');
-    menuItem.style.cssText = `
-      padding: 8px 12px;
-      cursor: pointer;
-      border-bottom: 1px solid #eee;
-      color: #000;
-      font-weight: 500;
-    `;
-    menuItem.textContent = 'Unblur this image';
-    menuItem.onmouseover = () => (menuItem.style.backgroundColor = '#f0f0f0');
-    menuItem.onmouseout = () => (menuItem.style.backgroundColor = 'white');
-    menuItem.onclick = () => {
-      unblurSpecificImage(blurredImg);
-      document.body.removeChild(contextMenu);
-    };
-
-    contextMenu.appendChild(menuItem);
-    document.body.appendChild(contextMenu);
-
-    // Remove context menu when clicking elsewhere
-    const removeMenu = () => {
-      if (document.body.contains(contextMenu)) {
-        document.body.removeChild(contextMenu);
-      }
-      document.removeEventListener('click', removeMenu);
-    };
-
-    setTimeout(() => document.addEventListener('click', removeMenu), 0);
   }
 });
 
@@ -331,6 +327,12 @@ function unblurSpecificImage(img) {
 
     // Mark as safe
     img.classList.add('ai-safe');
+
+    // Add to user unblurred images and save to storage
+    userUnblurredImages.add(img.src);
+    chrome.storage.local.set({
+      userUnblurredImages: Array.from(userUnblurredImages),
+    });
 
     LOG('Manually unblurred image:', img.src);
   }
