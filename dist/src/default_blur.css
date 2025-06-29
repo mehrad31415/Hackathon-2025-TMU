@@ -1,9 +1,2 @@
-/* default_blur.css  –  every image is hidden until JS marks it safe */
-img {
-  filter: blur(30px) !important;        /* nothing flashes un-blurred */
-  transition: filter 0.25s ease-out;    /* smooth reveal for safe imgs */
-}
-
-img.ai-safe {
-  filter: none !important;              /* JS adds this class */
-}
+img{transition:filter .25s ease-out;filter:blur(30px)!important}img.ai-safe{filter:none!important}
+/*# sourceMappingURL=default_blur.css.map */

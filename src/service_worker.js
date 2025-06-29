@@ -1,5 +1,6 @@
 /*  service-worker with verbose logging (ES-module)  */
-import * as tf from '@tensorflow/tfjs';
+import '@tensorflow/tfjs-core';           // core TF operations (tensors, math)
+import '@tensorflow/tfjs-backend-webgl';  // uses WebGL backend in browser
 import * as mobilenet from '@tensorflow-models/mobilenet';
 
 const IMAGE_SIZE = 224;

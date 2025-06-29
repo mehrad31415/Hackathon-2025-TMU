@@ -1,28 +1,13 @@
-/**  AI-Snake-Blur content script  **/
-
-/* ---------- constants ---------- */
-const IMAGE_SIZE = 224; // MobileNet input
-const MIN_IMG_PX = 128; // skip tiny icons
-const THRESHOLD_MS = 5000; // give fetch fallback max 5 s
-
-const BLUR_WRAPPER = 'ai-blur-wrapper';
-const BLUR_OVERLAY = 'ai-blur-overlay';
-const WARNING_OVERLAY = 'ai-warning-overlay';
-const LOG = (...a) => console.debug('[AI-Blur]', ...a);
-
-/* ---------- inject CSS once ---------- */
-(() => {
-  const style = document.createElement('style');
-  style.textContent = `
-    .${BLUR_WRAPPER}{display:inline-block;position:relative;}
-    .${BLUR_OVERLAY}{
+(()=>{let e="ai-blur-wrapper",t="ai-blur-overlay",a="ai-warning-overlay",r=(...e)=>console.debug("[AI-Blur]",...e);function o(e){e.classList.add("ai-safe")}(()=>{let o=document.createElement("style");o.textContent=`
+    .${e}{display:inline-block;position:relative;}
+    .${t}{
       position:absolute;inset:0;
       backdrop-filter:blur(30px);
       background:rgba(0,0,0,.3);
       pointer-events:none;
       z-index:1;
     }
-    .${WARNING_OVERLAY}{
+    .${a}{
       position:absolute;
       top:8px;
       left:8px;
@@ -40,242 +25,12 @@ const LOG = (...a) => console.debug('[AI-Blur]', ...a);
       margin-right:8px;
       word-wrap:break-word;
     }
-    .${BLUR_WRAPPER}:hover .${WARNING_OVERLAY}{
+    .${e}:hover .${a}{
       background:rgba(255,255,255,0.95);
-    }`;
-  (document.head || document.documentElement).appendChild(style);
-  LOG('CSS injected');
-})();
-
-/* ---------- un-blur helper ---------- */
-function unblurImage(img) {
-  img.classList.add('ai-safe'); // CSS lifts the default blur
-}
-
-/* ---------- blur helper with warning ---------- */
-function blurImage(img, classificationTag = 'sensitive content') {
-  if (img.dataset.aiBlurProcessed) return;
-
-  const wrap = document.createElement('span');
-  wrap.className = BLUR_WRAPPER;
-  img.parentNode.insertBefore(wrap, img);
-  wrap.appendChild(img);
-
-  const overlay = document.createElement('div');
-  overlay.className = BLUR_OVERLAY;
-  wrap.appendChild(overlay);
-
-  // Add warning overlay
-  const warning = document.createElement('div');
-  warning.className = WARNING_OVERLAY;
-  warning.textContent = `Warning: image may contain ${classificationTag}`;
-  wrap.appendChild(warning);
-
-  img.dataset.aiBlurProcessed = '1';
-  img.dataset.aiClassificationTag = classificationTag;
-}
-
-/* ---------- util ---------- */
-const processedUrls = new Set();
-const imgsBySrc = (url) =>
-  Array.from(document.images).filter((im) => im.src === url);
-
-/* ---------- pixel helpers ---------- */
-function drawToCanvas(imgLike) {
-  const c =
-    typeof OffscreenCanvas !== 'undefined'
-      ? new OffscreenCanvas(IMAGE_SIZE, IMAGE_SIZE)
-      : (() => {
-          const el = document.createElement('canvas');
-          el.width = IMAGE_SIZE;
-          el.height = IMAGE_SIZE;
-          return el;
-        })();
-  const ctx = c.getContext('2d');
-  ctx.drawImage(imgLike, 0, 0, IMAGE_SIZE, IMAGE_SIZE);
-  return ctx.getImageData(0, 0, IMAGE_SIZE, IMAGE_SIZE);
-}
-
-async function fetchAndDecode(url) {
-  // timeout helper
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), THRESHOLD_MS);
-
-  try {
-    const resp = await fetch(url, { mode: 'cors', signal: ctrl.signal });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const blob = await resp.blob();
-    const objURL = URL.createObjectURL(blob);
-    const img = new Image();
-    img.src = objURL;
-    await img.decode();
-    URL.revokeObjectURL(objURL);
-    return img;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/* ---------- main classify by URL ---------- */
-async function classifyUrl(url) {
-  if (processedUrls.has(url)) return;
-  processedUrls.add(url);
-
-  let imgData;
-  /* 1️⃣  try drawing an existing <img> if we have one */
-  const domImg = imgsBySrc(url)[0];
-  if (domImg) {
-    try {
-      imgData = drawToCanvas(domImg);
-    } catch (e) {
-      LOG('tainted DOM canvas, fallback to fetch', url);
-    }
-  }
-
-  /* 2️⃣  CORS-safe fallback: fetch + objectURL */
-  if (!imgData) {
-    try {
-      const fetchedImg = await fetchAndDecode(url);
-      imgData = drawToCanvas(fetchedImg);
-    } catch (err) {
-      LOG('fetch fallback failed', url, err.message);
-      return; // give up
-    }
-  }
-
-  chrome.runtime.sendMessage({
-    action: 'CLASSIFY_IMAGE',
-    rawImageData: Array.from(imgData.data),
-    width: IMAGE_SIZE,
-    height: IMAGE_SIZE,
-    url,
-  });
-  LOG('→ CLASSIFY_IMAGE', url);
-}
-
-/* ---------- decide whether to queue a DOM <img> ---------- */
-function consider(img) {
-  if (!img.complete) return; // still loading
-  if (Math.max(img.naturalWidth, img.naturalHeight) < MIN_IMG_PX) return;
-  classifyUrl(img.src);
-}
-
-/* ---------- reprocess all images on page ---------- */
-function reprocessAllImages() {
-  LOG('Reprocessing all images on page');
-
-  // Clear processed URLs cache to allow reprocessing
-  processedUrls.clear();
-
-  // Remove all existing blur wrappers and overlays
-  document.querySelectorAll(`.${BLUR_WRAPPER}`).forEach((wrapper) => {
-    const img = wrapper.querySelector('img');
-    if (img) {
-      wrapper.parentNode.insertBefore(img, wrapper);
-      wrapper.remove();
-      delete img.dataset.aiBlurProcessed;
-      delete img.dataset.aiClassificationTag;
-    }
-  });
-
-  // Remove all ai-safe classes
-  document.querySelectorAll('img.ai-safe').forEach((img) => {
-    img.classList.remove('ai-safe');
-  });
-
-  // Reprocess all images
-  document.querySelectorAll('img').forEach(consider);
-}
-
-/* ---------- initial sweep ---------- */
-document.querySelectorAll('img').forEach(consider);
-
-/* ---------- IntersectionObserver for infinite scroll ---------- */
-const io = new IntersectionObserver(
-  (entries) => {
-    entries.forEach((e) => {
-      if (e.isIntersecting) consider(e.target);
-    });
-  },
-  { root: null, threshold: 0 }
-);
-
-document.querySelectorAll('img').forEach((img) => io.observe(img));
-
-/* ---------- MutationObserver: new nodes + src/srcset changes ---------- */
-new MutationObserver((muts) => {
-  for (const m of muts) {
-    /* new nodes */
-    m.addedNodes.forEach((n) => {
-      if (n.tagName === 'IMG') {
-        io.observe(n);
-        consider(n);
-      } else if (n.querySelectorAll) {
-        n.querySelectorAll('img').forEach((img) => {
-          io.observe(img);
-          consider(img);
-        });
-      }
-    });
-    /* src / srcset change on existing img */
-    if (m.type === 'attributes' && m.target.tagName === 'IMG') {
-      if (m.attributeName === 'src' || m.attributeName === 'srcset') {
-        consider(m.target);
-      }
-    }
-  }
-}).observe(document.documentElement, {
-  childList: true,
-  subtree: true,
-  attributes: true,
-  attributeFilter: ['src', 'srcset'],
-});
-
-/* ---------- verdict listener ---------- */
-chrome.runtime.onMessage.addListener((msg) => {
-  if (msg.action === 'BLUR_IF_BLOCKLIST') {
-    const targets = imgsBySrc(msg.url);
-
-    if (msg.shouldBlur) {
-      // 🚫  blocked ⇒ keep default blur + overlay
-      targets.forEach((img) =>
-        blurImage(img, msg.classificationTag || 'sensitive content')
-      );
-      LOG(
-        'BLOCKED',
-        targets.length,
-        'img(s)',
-        msg.url,
-        'Tag:',
-        msg.classificationTag
-      );
-    } else {
-      // ✅  safe ⇒ remove default blur
-      targets.forEach(unblurImage);
-      LOG('SAFE', targets.length, 'img(s)', msg.url);
-    }
-  } else if (msg.action === 'REPROCESS_IMAGES') {
-    // Reprocess all images when settings are updated
-    reprocessAllImages();
-  }
-});
-
-/* ---------- context menu listener ---------- */
-document.addEventListener('contextmenu', function (e) {
-  // Check if right-clicked on a blurred image
-  const blurredImg =
-    e.target.closest(`.${BLUR_WRAPPER} img`) ||
-    (e.target.tagName === 'IMG' && e.target.dataset.aiBlurProcessed);
-
-  if (blurredImg) {
-    e.preventDefault();
-
-    // Create custom context menu
-    const contextMenu = document.createElement('div');
-    contextMenu.style.cssText = `
+    }`,(document.head||document.documentElement).appendChild(o),r("CSS injected")})();let n=new Set,i=e=>Array.from(document.images).filter(t=>t.src===e);function l(e){let t=("undefined"!=typeof OffscreenCanvas?new OffscreenCanvas(224,224):(()=>{let e=document.createElement("canvas");return e.width=224,e.height=224,e})()).getContext("2d");return t.drawImage(e,0,0,224,224),t.getImageData(0,0,224,224)}async function s(e){let t=new AbortController,a=setTimeout(()=>t.abort(),5e3);try{let a=await fetch(e,{mode:"cors",signal:t.signal});if(!a.ok)throw Error(`HTTP ${a.status}`);let r=await a.blob(),o=URL.createObjectURL(r),n=new Image;return n.src=o,await n.decode(),URL.revokeObjectURL(o),n}finally{clearTimeout(a)}}async function c(e){let t;if(n.has(e))return;n.add(e);let a=i(e)[0];if(a)try{t=l(a)}catch(t){r("tainted DOM canvas, fallback to fetch",e)}if(!t)try{let a=await s(e);t=l(a)}catch(t){r("fetch fallback failed",e,t.message);return}chrome.runtime.sendMessage({action:"CLASSIFY_IMAGE",rawImageData:Array.from(t.data),width:224,height:224,url:e}),r("→ CLASSIFY_IMAGE",e)}function d(e){e.complete&&(128>Math.max(e.naturalWidth,e.naturalHeight)||c(e.src))}document.querySelectorAll("img").forEach(d);let u=new IntersectionObserver(e=>{e.forEach(e=>{e.isIntersecting&&d(e.target)})},{root:null,threshold:0});document.querySelectorAll("img").forEach(e=>u.observe(e)),new MutationObserver(e=>{for(let t of e)t.addedNodes.forEach(e=>{"IMG"===e.tagName?(u.observe(e),d(e)):e.querySelectorAll&&e.querySelectorAll("img").forEach(e=>{u.observe(e),d(e)})}),"attributes"===t.type&&"IMG"===t.target.tagName&&("src"===t.attributeName||"srcset"===t.attributeName)&&d(t.target)}).observe(document.documentElement,{childList:!0,subtree:!0,attributes:!0,attributeFilter:["src","srcset"]}),chrome.runtime.onMessage.addListener(l=>{if("BLUR_IF_BLOCKLIST"===l.action){let n=i(l.url);l.shouldBlur?(n.forEach(r=>(function(r,o="sensitive content"){if(r.dataset.aiBlurProcessed)return;let n=document.createElement("span");n.className=e,r.parentNode.insertBefore(n,r),n.appendChild(r);let i=document.createElement("div");i.className=t,n.appendChild(i);let l=document.createElement("div");l.className=a,l.textContent=`Warning: image may contain ${o}`,n.appendChild(l),r.dataset.aiBlurProcessed="1",r.dataset.aiClassificationTag=o})(r,l.classificationTag||"sensitive content")),r("BLOCKED",n.length,"img(s)",l.url,"Tag:",l.classificationTag)):(n.forEach(o),r("SAFE",n.length,"img(s)",l.url))}else"REPROCESS_IMAGES"===l.action&&(r("Reprocessing all images on page"),n.clear(),document.querySelectorAll(`.${e}`).forEach(e=>{let t=e.querySelector("img");t&&(e.parentNode.insertBefore(t,e),e.remove(),delete t.dataset.aiBlurProcessed,delete t.dataset.aiClassificationTag)}),document.querySelectorAll("img.ai-safe").forEach(e=>{e.classList.remove("ai-safe")}),document.querySelectorAll("img").forEach(d))}),document.addEventListener("contextmenu",function(t){let a=t.target.closest(`.${e} img`)||"IMG"===t.target.tagName&&t.target.dataset.aiBlurProcessed;if(a){t.preventDefault();let o=document.createElement("div");o.style.cssText=`
       position: fixed;
-      top: ${e.clientY}px;
-      left: ${e.clientX}px;
+      top: ${t.clientY}px;
+      left: ${t.clientX}px;
       background: white;
       border: 1px solid #ccc;
       border-radius: 4px;
@@ -284,54 +39,11 @@ document.addEventListener('contextmenu', function (e) {
       font-family: Arial, sans-serif;
       font-size: 12px;
       min-width: 150px;
-    `;
-
-    const menuItem = document.createElement('div');
-    menuItem.style.cssText = `
+    `;let n=document.createElement("div");n.style.cssText=`
       padding: 8px 12px;
       cursor: pointer;
       border-bottom: 1px solid #eee;
       color: #000;
       font-weight: 500;
-    `;
-    menuItem.textContent = 'Unblur this image';
-    menuItem.onmouseover = () => (menuItem.style.backgroundColor = '#f0f0f0');
-    menuItem.onmouseout = () => (menuItem.style.backgroundColor = 'white');
-    menuItem.onclick = () => {
-      unblurSpecificImage(blurredImg);
-      document.body.removeChild(contextMenu);
-    };
-
-    contextMenu.appendChild(menuItem);
-    document.body.appendChild(contextMenu);
-
-    // Remove context menu when clicking elsewhere
-    const removeMenu = () => {
-      if (document.body.contains(contextMenu)) {
-        document.body.removeChild(contextMenu);
-      }
-      document.removeEventListener('click', removeMenu);
-    };
-
-    setTimeout(() => document.addEventListener('click', removeMenu), 0);
-  }
-});
-
-/* ---------- unblur specific image ---------- */
-function unblurSpecificImage(img) {
-  const wrapper = img.closest(`.${BLUR_WRAPPER}`);
-  if (wrapper) {
-    // Move image back to original position
-    wrapper.parentNode.insertBefore(img, wrapper);
-    wrapper.remove();
-
-    // Remove blur processing data
-    delete img.dataset.aiBlurProcessed;
-    delete img.dataset.aiClassificationTag;
-
-    // Mark as safe
-    img.classList.add('ai-safe');
-
-    LOG('Manually unblurred image:', img.src);
-  }
-}
+    `,n.textContent="Unblur this image",n.onmouseover=()=>n.style.backgroundColor="#f0f0f0",n.onmouseout=()=>n.style.backgroundColor="white",n.onclick=()=>{(function(t){let a=t.closest(`.${e}`);a&&(a.parentNode.insertBefore(t,a),a.remove(),delete t.dataset.aiBlurProcessed,delete t.dataset.aiClassificationTag,t.classList.add("ai-safe"),r("Manually unblurred image:",t.src))})(a),document.body.removeChild(o)},o.appendChild(n),document.body.appendChild(o);let i=()=>{document.body.contains(o)&&document.body.removeChild(o),document.removeEventListener("click",i)};setTimeout(()=>document.addEventListener("click",i),0)}})})();
+//# sourceMappingURL=content.js.map

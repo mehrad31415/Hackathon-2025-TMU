@@ -1,24 +1,25 @@
 {
   "name": "tfjs-basic-chrome-extension",
-  "version": "0.2.0",
-  "description": "Use tfjs model.predict in a chrome extension (v3)",
+  "version": "0.3.0",
+  "description": "Chrome Extension (MV3) using MobileNet + TFJS",
+  "license": "Apache-2.0",
   "scripts": {
-    "copy": "mkdir -p dist/src && cp src/content.js src/default_blur.css src/popup.html src/popup.js dist/src/",
-    "build": "parcel build src/service_worker.js --dist-dir dist/src/ && npm run copy",
-    "watch": "npm run copy && parcel watch src/service_worker.js --dist-dir dist/src/"
+    "build": "parcel build src/service_worker.js src/content.js src/popup.js src/popup.html src/default_blur.css --dist-dir dist/src && mkdir -p dist && cp -a public/. dist/",
+    "watch": "parcel watch src/service_worker.js src/content.js src/popup.js src/popup.html src/default_blur.css --dist-dir dist/src",
+    "clean": "rm -rf .parcel-cache dist node_modules package-lock.json && echo 'Workspace wiped — run npm install or docker build next.'"
   },
-  "license": "Apache 2.0",
+  "dependencies": {
+    "@tensorflow-models/mobilenet": "2.1.1",
+    "@tensorflow/tfjs-core": "4.22.0",
+    "@tensorflow/tfjs-backend-webgl": "4.22.0"
+  },
   "devDependencies": {
+    "parcel": "^2.15.4",
     "buffer": "^6.0.3",
-    "clang-format": "^1.2.3",
-    "parcel": "^2.3.2",
-    "process": "^0.11.10"
+    "process": "^0.11.10",
+    "clang-format": "^1.8.0"
   },
   "resolutions": {
     "node-fetch": "2.6.7"
-  },
-  "dependencies": {
-    "@tensorflow-models/mobilenet": "^2.1.0",
-    "@tensorflow/tfjs": "^3.13.0"
   }
 }
