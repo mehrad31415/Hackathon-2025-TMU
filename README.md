@@ -10,9 +10,32 @@ npm i
 npm run build
 ```
 
-To install the unpacked extension in chrome, follow the [instructions here](https://developer.chrome.com/extensions/getstarted).  Briefly, navigate to `chrome://extensions`, make sure that the `Developer mode` switch is turned on in the upper right, and click `Load Unpacked`.  Then select the appropriate directory (the `dist` directory containing `manifest.json`);
+Load the Extension into Chrome
 
-If it worked you should see an icon for the `SafeWeb` Chrome extension.
+1. Open Chrome and go to `chrome://extensions/`
+2. Enable **Developer mode** (toggle in the top-right corner)
+3. Click the **"Load unpacked"** button
+4. Navigate to the project directory and select the `dist/` folder
+5. Once loaded, the extension will appear in your toolbar (you may need to **pin** it)
+
+---
+
+## How to Use
+
+1. Click the **puzzle piece icon** 🧩 in your Chrome taskbar
+2. **Pin** the **AI-Blur** extension for easy access
+3. Click the **AI-Blur** icon to open its popup window
+
+From here, you can:
+
+- Enter a **comma-separated list of words** that you want to filter (e.g., `snake, blood, spider`)
+- Use **toggle switches** to enable predefined categories like:
+  - Violence
+  - Weapons
+  - Insects
+  - Animals
+
+> The extension will automatically blur matching images as you browse. No refresh needed!
 
 ![install page illustration](./install.png "install page")
 
@@ -34,24 +57,38 @@ Removing the extension
 ----
 To remove the extension, click `Remove` on the extension page, or use the `Remove from Chrome...` menu option when right clicking the icon.
 
-## Development notes
+## 🛠️ Development Notes
 
-Here is how the extension works at a high level:
+Here is how the **SafeWeb** Chrome extension works at a high level:
 
-- A [service worker](https://developer.chrome.com/docs/extensions/mv3/migrating_to_service_workers/) `src/service_worker.js` is created that bundles
-the TFJS union package and the [mobilenet model](https://github.com/tensorflow/tfjs-models/tree/master/mobilenet). We use a bundler
-([parcel](https://parceljs.org/)) to bundle everything together so no external
-scripts are loaded at runtime. This is to comply with the requirement of Chrome Extension V3. Note that a service worker can still load external resources
-(such as TFJS models).
-- Create a context menu item in the service worker that operates on images.
-When the menu item is clicked, the image src is sent to the content script for
-processing. Note that in a service worker, DOM objects (e.g. Image, document,
-etc) are not available.
-- After the content script `content.js` receives the image src, it loads the
-image, renders the image on an `OffscreenCanvas`, gets the `ImageData` from the
-canvas, and sends the data back to the service worker.
-- After the service worker receives the image data, it runs the mobilenet model
-with the data, and gets the prediction results. It then sends to results back
-to the content script for display.
-- After the content script receives the results, it overlays the results on top
-of the original image.
+1. **Service Worker Setup**  
+   A service worker (`src/service_worker.js`) is responsible for orchestrating the model loading, API interactions, and image classification logic. It bundles:
+   - TensorFlow.js (`@tensorflow/tfjs`)
+   - The MobileNet model (`@tensorflow-models/mobilenet`)  
+   
+
+2. **User Input for Blocklist Terms**  
+   Users can enter a **comma-separated list of keywords** directly through the extension popup. These words are stored using `chrome.storage.sync` and dynamically loaded into the service worker.
+
+3. **Predefined Category Toggles**  
+   The extension includes toggles for **predefined content categories** (e.g., violence, animals, weapons). When enabled, predefined words for that category are merged into the blocklist.
+
+4. **Blocklist Expansion via Gemini API**  
+   Upon initialization and whenever settings are updated, the service worker uses the **Gemini API** to semantically expand each user-supplied blocklist term by finding related or similar concepts from a cleaned master label list.
+
+5. **Image Detection Pipeline**
+   - A **content script (`content.js`)** scans the DOM for images and renders each onto an **OffscreenCanvas** to extract raw `ImageData`.
+   - This pixel data, along with the image URL and tab ID, is sent to the service worker via `chrome.runtime.sendMessage`.
+
+6. **Image Classification and Decision**
+   - The service worker receives the image data, uses the **MobileNet model** to classify the content, and matches the top predictions against the **expanded blocklist**.
+   - If any match meets the defined probability threshold, it sends a blur instruction back to the content script.
+
+7. **Blurring and Overlaying**
+   - The content script receives the classification result and **blurs** the matching images.
+
+
+8. **Settings Reload Support**
+   - When a user modifies their settings in the popup, the extension sends a `'RELOAD_SETTINGS'` message to the service worker.
+   - This triggers reloading the blocklist and notifies all open tabs to **reprocess their images** without requiring a full page reload.
+
