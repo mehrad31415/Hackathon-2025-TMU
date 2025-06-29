@@ -1,27 +1,25 @@
-# TensorFlow.js Deployment Example : Browser Extension
+# SafeWeb: AI-Powered Real-Time Content Filter for the Web
 
-This example creates a Chrome extension (v3), enabling users to right-click on
-images within a web page, and perform multi-class object detection on them. The
-extension will apply a MobileNetV2 classifier to the image, and then print
-the predicted class on top of the image.
+This Chrome extension (Manifest v3) lets you browse with custom image filtering: simply enter the keywords you want hidden—say, “bears”, and the add-on combines a lightweight MobileNet V2 model with a fast scan of each image’s alt text and surrounding captions to detect matching content in real time. Images that meet your criteria are automatically blurred, yet you can reveal any of them instantly with a click whenever you choose.
 
 To build the extension, use the command:
 
 ```sh
-yarn
-yarn build
+npm build clean
+npm i
+npm run build
 ```
 
 To install the unpacked extension in chrome, follow the [instructions here](https://developer.chrome.com/extensions/getstarted).  Briefly, navigate to `chrome://extensions`, make sure that the `Developer mode` switch is turned on in the upper right, and click `Load Unpacked`.  Then select the appropriate directory (the `dist` directory containing `manifest.json`);
 
-If it worked you should see an icon for the `TF.js mobilenet` Chrome extension.
+If it worked you should see an icon for the `SafeWeb` Chrome extension.
 
 ![install page illustration](./install.png "install page")
 
 
 Using the extension
 ----
-Once the extension is installed, you should be able to classify images in the browser.  To do so, navigate to a site with images on it, such as the Google image search page for the term "tiger" used here.  Then right click on the image you wish to classify.  You should see a menu option for `Classify image with TensorFlow.js`.  Clicking that image should cause the extension to execute the model on the image, and then add some text over the image indicating the prediction.
+After installing the extension, just click its icon and enter your custom keywords as a comma-separated list. You can also enable the “-like” option—so “dog-like,” for example, will blur both dogs and wolves—or switch on the built-in category toggles such as “violence,” which automatically covers related terms like “knife” and “gun.” From that point on, matching images are blurred as the page loads, each with a small warning label summarizing what was detected; if you decide you’d rather see a particular picture, simply click it to reveal the original, much like Instagram’s sensitive-content overlay.
 
 ![usage](./usage.png "usage")
 
