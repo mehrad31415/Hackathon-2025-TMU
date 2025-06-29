@@ -20,12 +20,12 @@ const LOG = (...a) => console.debug('[AI-Blur]', ...a);
       backdrop-filter:blur(30px);
       background:rgba(0,0,0,.3);
       pointer-events:none;
+      z-index:1;
     }
     .${WARNING_OVERLAY}{
       position:absolute;
       top:8px;
       left:8px;
-      max-width:calc(100% - 16px);
       background:rgba(255,255,255,0.9);
       color:#333;
       padding:8px 12px;
@@ -35,7 +35,7 @@ const LOG = (...a) => console.debug('[AI-Blur]', ...a);
       border:1px solid rgba(0,0,0,0.1);
       box-shadow:0 2px 4px rgba(0,0,0,0.1);
       pointer-events:none;
-      z-index:1000;
+      z-index:2;
       line-height:1.2;
       margin-right:8px;
       word-wrap:break-word;
