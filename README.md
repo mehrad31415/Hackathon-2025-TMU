@@ -23,8 +23,8 @@ Load the Extension into Chrome
 ## How to Use
 
 1. Click the **puzzle piece icon** 🧩 in your Chrome taskbar
-2. **Pin** the **AI-Blur** extension for easy access
-3. Click the **AI-Blur** icon to open its popup window
+2. **Pin** the **SafeWeb AI** extension for easy access
+3. Click the **SafeWeb AI** icon to open its popup window
 
 From here, you can:
 
