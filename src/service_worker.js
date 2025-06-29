@@ -10,7 +10,7 @@ const THRESHOLD = 0.05;
 const RETRY_MS = 3000;
 const LOG = (...a) => console.info('[AI-Blur][SW]', ...a);
 
-const GEMINI_API_KEY = 'AIzaSyCsTL6st5CCS4a_PRPnHmWv-gTShczL9uU';
+const GEMINI_API_KEY = 'AIzaSyC3PQl5-C_eXzpFc2ksWoVE5d1afdXTq5M';
 const GEMINI_API_URL =
   'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent';
 
