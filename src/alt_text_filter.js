@@ -4,11 +4,16 @@
 const BLUR_WRAPPER = 'ai-blur-wrapper';
 const BLUR_OVERLAY = 'ai-blur-overlay';
 const WARNING_OVERLAY = 'ai-warning-overlay';
-const DATA_KEY = 'aiBlurAlt';            // dataset flag
+const DATA_KEY = 'aiBlurAlt'; // dataset flag
 const LOG = (...a) => console.debug('[AI-Blur-ALT]', ...a);
 
+// at the top, add:
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function blurImgWithAlt(img, word) {
-  if (img.dataset[DATA_KEY]) return;     // already processed
+  if (img.dataset[DATA_KEY]) return; // already processed
 
   // Wrap in span and add overlay (same CSS classes as main script)
   const wrap = document.createElement('span');
@@ -45,7 +50,7 @@ function blurImgWithAlt(img, word) {
       chrome.storage.sync.get(['blocklist'], (res) => {
         currentBlocklist = (res.blocklist || []).map((w) => w.toLowerCase());
         LOG('Reloaded blocklist:', currentBlocklist);
-        scanAllImages(true);   // force re-evaluate
+        scanAllImages(true); // force re-evaluate
       });
     }
   });
@@ -55,12 +60,20 @@ function blurImgWithAlt(img, word) {
     if (!img) return;
     if (!force && img.dataset[DATA_KEY]) return;
 
-    const altText =
-      (img.alt || img.getAttribute('aria-label') || '').toLowerCase();
+    const altText = (
+      img.alt ||
+      img.getAttribute('aria-label') ||
+      ''
+    ).toLowerCase();
     if (!altText) return;
 
-    const hit = currentBlocklist.find((w) => altText.includes(w));
-    console.log('[Alt Filter] Checking:', altText, '→ match:', !!hit);
+    // find a block word as a whole word
+    const hit = currentBlocklist.find((w) => {
+      const re = new RegExp(`\\b${escapeRegExp(w)}\\b`, 'i');
+      return re.test(altText);
+    });
+
+    console.log('[Alt Filter] Checking:', altText, '→ match:', hit);
     if (hit) blurImgWithAlt(img, hit);
   }
 
