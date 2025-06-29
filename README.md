@@ -22,12 +22,13 @@ Using the extension
 After installing the extension, just click its icon and enter your custom keywords as a comma-separated list. You can also enable the “-like” option—so “dog-like,” for example, will blur both dogs and wolves—or switch on the built-in category toggles such as “violence,” which automatically covers related terms like “knife” and “gun.” From that point on, matching images are blurred as the page loads, each with a small warning label summarizing what was detected; if you decide you’d rather see a particular picture, simply click it to reveal the original, much like Instagram’s sensitive-content overlay.
 
 ![BeforeUsing](./before_.png "Before using")
-
+*Figure&nbsp;1 – Extension popup before any keywords are set*
 
 ![AfterUsing](./after_.png "After using")
-
+*Figure&nbsp;2 – Images that match your block list are blurred on load*
 
 ![Unblur](./unblur_.png "Unblur")
+*Figure&nbsp;3 – Click to reveal a single image if you change your mind*
 
 Removing the extension
 ----
